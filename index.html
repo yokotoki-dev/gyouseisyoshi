@@ -110,14 +110,14 @@
   .mode-switch { display: flex; align-items: center; gap: 8px; }
   .mode-badge {
     font-size: 12px;
-    color: var(--ink);
+    color: var(--muted);
     background: var(--card-bg);
-    border: 1px solid var(--border);
-    border-radius: 20px;
+    border-radius: 4px;
     padding: 6px 12px;
     white-space: nowrap;
+    cursor: default;
   }
-  .mode-badge.view { background: var(--review-bg); border-color: var(--primary-light); color: var(--primary); }
+  .mode-badge.view { background: var(--review-bg); color: var(--primary); }
   .filter-btn { flex: 1; padding: 10px; border-radius: 20px; border: 1px solid var(--border); background: var(--card-bg); font-size: 13px; cursor: pointer; text-align: center; }
   .filter-btn.active { background: var(--primary); color: #fff; border-color: var(--primary); }
   #theme-instruction {
