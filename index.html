@@ -132,6 +132,13 @@
     transition: border-color .15s, background .15s;
   }
   .bucket h3 { margin: 0 0 8px; font-size: 15px; color: var(--primary); }
+  .bucket-title.masked {
+    background: var(--border);
+    color: var(--muted);
+    border-radius: 6px;
+    cursor: pointer;
+    user-select: none;
+  }
   .bucket.drag-over { border-color: var(--primary-light); background: #eef4fa; }
   .bucket-cards { display: flex; flex-wrap: wrap; gap: 6px; justify-content: center; }
   .card.sorted {
@@ -744,10 +751,22 @@
       const div = document.createElement('div');
       div.className = 'bucket';
       div.dataset.bucketId = bucket.id;
-      div.innerHTML = `<h3>${bucket.title}</h3><div class="bucket-cards"></div>`;
 
-      // タップで仕分け(カード選択済みの場合)
-      div.addEventListener('click', () => {
+      if (isViewMode) {
+        // 閲覧モード: バケツの見出し(分類名)を隠し、タップで表示させる
+        div.innerHTML = `<h3 class="bucket-title masked" data-title="${bucket.title}">タップで表示</h3><div class="bucket-cards"></div>`;
+      } else {
+        div.innerHTML = `<h3 class="bucket-title">${bucket.title}</h3><div class="bucket-cards"></div>`;
+      }
+
+      // タップで仕分け(カード選択済みの場合)、または閲覧モードでの見出し表示切り替え
+      div.addEventListener('click', e => {
+        const titleEl = div.querySelector('.bucket-title');
+        if (isViewMode && titleEl.classList.contains('masked') && e.target === titleEl) {
+          titleEl.classList.remove('masked');
+          titleEl.textContent = titleEl.dataset.title;
+          return;
+        }
         if (selectedQuestionId) handleAnswer(selectedQuestionId, bucket.id);
       });
 
