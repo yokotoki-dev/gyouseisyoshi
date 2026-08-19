@@ -66,6 +66,7 @@
   .theme-link-arrow { color: var(--muted); }
   .list-empty { color: var(--muted); font-size: 14px; text-align: center; padding: 24px 0; }
   .list-filters { display: flex; gap: 10px; margin-bottom: 12px; }
+  .list-secondary-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
   .sort-toggle-btn {
     background: none;
     border: none;
@@ -74,8 +75,6 @@
     text-decoration: underline;
     cursor: pointer;
     padding: 0;
-    margin-bottom: 16px;
-    display: block;
   }
   .sort-toggle-btn.active { color: var(--primary-light); font-weight: 600; }
   .practice-top-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
@@ -108,7 +107,17 @@
     cursor: pointer;
     padding: 6px 12px;
   }
-  .mode-toggle-btn.active { background: var(--primary); color: #fff; border-color: var(--primary); }
+  .mode-switch { display: flex; align-items: center; gap: 8px; }
+  .mode-badge {
+    font-size: 12px;
+    color: var(--ink);
+    background: var(--card-bg);
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    padding: 4px 10px;
+    white-space: nowrap;
+  }
+  .mode-badge.view { background: var(--review-bg); border-color: var(--primary-light); color: var(--primary); }
   .filter-btn { flex: 1; padding: 10px; border-radius: 20px; border: 1px solid var(--border); background: var(--card-bg); font-size: 13px; cursor: pointer; text-align: center; }
   .filter-btn.active { background: var(--primary); color: #fff; border-color: var(--primary); }
   #theme-instruction {
@@ -261,7 +270,13 @@
       <button class="filter-btn active" data-filter="all">すべて</button>
       <button class="filter-btn" data-filter="bookmark">★ ブックマーク</button>
     </div>
-    <button class="sort-toggle-btn" id="sort-toggle-btn">正答率が低い順に並べ替え</button>
+    <div class="list-secondary-row">
+      <button class="sort-toggle-btn" id="sort-toggle-btn">正答率が低い順に並べ替え</button>
+      <div class="mode-switch">
+        <span class="mode-badge" id="list-mode-badge">✏️ 仕分け中</span>
+        <button class="mode-toggle-btn" id="list-mode-toggle-btn">モード切替</button>
+      </div>
+    </div>
     <div id="theme-list"></div>
   </div>
 
@@ -272,7 +287,10 @@
     </div>
     <div class="mode-toggle-row">
       <button class="reset-progress-btn" id="reset-progress-btn">🔄 このテーマの成績をリセット</button>
-      <button class="mode-toggle-btn" id="mode-toggle-btn">👁 閲覧モードにする</button>
+      <div class="mode-switch">
+        <span class="mode-badge" id="mode-badge">✏️ 仕分け中</span>
+        <button class="mode-toggle-btn" id="mode-toggle-btn">モード切替</button>
+      </div>
     </div>
     <div id="theme-instruction">読み込み中...</div>
     <div id="buckets" class="buckets"></div>
@@ -621,10 +639,17 @@
   }
 
   function updateModeToggleButton() {
-    const btn = document.getElementById('mode-toggle-btn');
-    btn.textContent = isViewMode ? '✏️ 仕分けモードにする' : '👁 閲覧モードにする';
-    btn.classList.toggle('active', isViewMode);
+    const badge = document.getElementById('mode-badge');
+    badge.textContent = isViewMode ? '👁 閲覧中' : '✏️ 仕分け中';
+    badge.classList.toggle('view', isViewMode);
     document.getElementById('deck-hint').hidden = isViewMode;
+  }
+
+  // 一覧画面側のバッジは「次にテーマを開くときの初期モード」を表す
+  function updateListModeToggleButton() {
+    const badge = document.getElementById('list-mode-badge');
+    badge.textContent = isViewMode ? '👁 閲覧中' : '✏️ 仕分け中';
+    badge.classList.toggle('view', isViewMode);
   }
 
   async function showListView() {
@@ -892,7 +917,12 @@
   document.getElementById('mode-toggle-btn').addEventListener('click', () => {
     isViewMode = !isViewMode;
     updateModeToggleButton();
+    updateListModeToggleButton();
     if (currentThemeId) loadTheme(currentThemeId);
+  });
+  document.getElementById('list-mode-toggle-btn').addEventListener('click', () => {
+    isViewMode = !isViewMode;
+    updateListModeToggleButton();
   });
   document.getElementById('next-theme-btn').addEventListener('click', goToNextTheme);
   document.getElementById('random-theme-btn').addEventListener('click', goToRandomTheme);
@@ -918,6 +948,7 @@
     }
   });
   setupListFilters();
+  updateListModeToggleButton();
   devSignIn().then(initListView);</script>
 </body>
 </html>
