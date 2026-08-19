@@ -1,0 +1,903 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>行政法 カード仕分けマスター</title>
+<style>
+  :root {
+    --ink: #2a2723;
+    --muted: #6b6558;
+    --bg: #f7f4ee;
+    --card-bg: #ffffff;
+    --primary: #1c2e4a;
+    --primary-light: #2f4870;
+    --review-bg: #eef1f6;
+    --accent: #b23a2e;
+    --accent-bg: #f7e9e6;
+    --correct: #1a7f5a;
+    --correct-bg: #e6f6ef;
+    --incorrect: #b3441e;
+    --incorrect-bg: #fbe9e2;
+    --border: #ddd6c8;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Yu Gothic", sans-serif;
+    background: var(--bg);
+    color: var(--ink);
+  }
+  .app { max-width: 720px; margin: 0 auto; padding: 24px 16px 100px; }
+  header h1 {
+    font-family: "Hiragino Mincho ProN", "Yu Mincho", "YuMincho", serif;
+    font-size: 22px;
+    font-weight: 600;
+    letter-spacing: .02em;
+    margin: 0 0 4px;
+  }
+  header p { color: var(--muted); font-size: 14px; margin: 0 0 20px; }
+  .deck-hint { color: var(--muted); font-size: 13px; margin: 0 0 10px; }
+  .filter-selectors { display: flex; gap: 10px; margin-bottom: 20px; }
+  .filter-selectors select { flex: 1; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--border); background: var(--card-bg); font-size: 14px; }
+  .category-group { margin-bottom: 20px; }
+  .category-heading { font-size: 13px; color: var(--muted); margin: 0 0 8px; font-weight: 600; }
+  .theme-link {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    background: var(--card-bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 14px 16px;
+    margin-bottom: 8px;
+    text-decoration: none;
+    color: var(--ink);
+    font-size: 14px;
+    transition: border-color .15s;
+  }
+  .theme-link:hover { border-color: var(--primary-light); }
+  .theme-link-main { display: flex; align-items: center; gap: 8px; }
+  .theme-link-star { cursor: pointer; color: #c9ccd1; font-size: 16px; line-height: 1; }
+  .theme-link-star.active { color: #f2a93b; }
+  .theme-link-right { display: flex; align-items: center; gap: 10px; }
+  .theme-link-accuracy { font-size: 12px; color: var(--muted); white-space: nowrap; }
+  .theme-link-arrow { color: var(--muted); }
+  .list-empty { color: var(--muted); font-size: 14px; text-align: center; padding: 24px 0; }
+  .list-filters { display: flex; gap: 10px; margin-bottom: 12px; }
+  .sort-toggle-btn {
+    background: none;
+    border: none;
+    color: var(--primary);
+    font-size: 12px;
+    text-decoration: underline;
+    cursor: pointer;
+    padding: 0;
+    margin-bottom: 16px;
+    display: block;
+  }
+  .sort-toggle-btn.active { color: var(--primary-light); font-weight: 600; }
+  .practice-top-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
+  .back-link {
+    background: none;
+    border: none;
+    color: var(--primary);
+    font-size: 13px;
+    text-decoration: underline;
+    cursor: pointer;
+    padding: 0;
+  }
+  .mode-toggle-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
+  .reset-progress-btn {
+    display: block;
+    background: none;
+    border: none;
+    color: var(--muted);
+    font-size: 12px;
+    text-decoration: underline;
+    cursor: pointer;
+    padding: 0;
+  }
+  .mode-toggle-btn {
+    background: var(--card-bg);
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    color: var(--ink);
+    font-size: 12px;
+    cursor: pointer;
+    padding: 6px 12px;
+  }
+  .mode-toggle-btn.active { background: var(--primary); color: #fff; border-color: var(--primary); }
+  .filter-btn { flex: 1; padding: 10px; border-radius: 20px; border: 1px solid var(--border); background: var(--card-bg); font-size: 13px; cursor: pointer; text-align: center; }
+  .filter-btn.active { background: var(--primary); color: #fff; border-color: var(--primary); }
+  #theme-instruction {
+    background: var(--card-bg);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 14px 16px;
+    font-size: 15px;
+    margin-bottom: 20px;
+    white-space: pre-line;
+  }
+  .buckets { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; margin-bottom: 24px; }
+  .bucket {
+    min-height: 90px;
+    background: var(--card-bg);
+    border: 2px dashed var(--border);
+    border-radius: 10px;
+    padding: 12px;
+    text-align: center;
+    cursor: pointer;
+    transition: border-color .15s, background .15s;
+  }
+  .bucket h3 { margin: 0 0 8px; font-size: 15px; color: var(--primary); }
+  .bucket.drag-over { border-color: var(--primary-light); background: #eef4fa; }
+  .bucket-cards { display: flex; flex-wrap: wrap; gap: 6px; justify-content: center; }
+  .card.sorted {
+    cursor: pointer;
+    font-size: 12px;
+    padding: 6px 10px;
+    background: #fff;
+    border-color: var(--border);
+    color: var(--ink);
+  }
+  .card.sorted:hover { border-color: var(--primary-light); }
+  .deck { display: flex; flex-wrap: wrap; gap: 10px; }
+  .card {
+    background: var(--card-bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 12px 14px;
+    font-size: 14px;
+    cursor: grab;
+    user-select: none;
+    transition: box-shadow .15s, border-color .15s;
+    white-space: pre-line;
+  }
+  .card.selected { border-color: var(--primary-light); box-shadow: 0 0 0 2px var(--primary-light) inset; }
+  .feedback {
+    padding: 14px 16px;
+    border-radius: 10px;
+    font-size: 14px;
+    line-height: 1.5;
+    margin-top: 16px;
+    white-space: pre-line;
+  }
+  .feedback.correct { background: var(--correct-bg); color: var(--correct); border: 1px solid var(--correct); }
+  .feedback.incorrect { background: var(--incorrect-bg); color: var(--incorrect); border: 1px solid var(--incorrect); }
+  .feedback.review { background: var(--review-bg); color: var(--primary); border: 1px solid var(--primary-light); }
+  .lock-screen {
+    background: var(--card-bg);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 48px 24px;
+    text-align: center;
+  }
+  .lock-icon { font-size: 32px; margin-bottom: 12px; }
+  .lock-title { font-size: 16px; font-weight: 600; margin: 0 0 6px; color: var(--primary); }
+  .lock-desc { font-size: 13px; color: var(--muted); margin: 0 0 24px; }
+  .lock-button {
+    background: var(--primary);
+    color: #fff;
+    border: none;
+    padding: 12px 32px;
+    border-radius: 8px;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  .lock-button:hover { background: var(--primary-light); }
+  .redeem-form { display: flex; gap: 8px; margin: 20px auto 0; max-width: 320px; }
+  .redeem-form input { flex: 1; padding: 10px; border-radius: 8px; border: 1px solid var(--border); font-size: 13px; }
+  .redeem-form button { padding: 10px 16px; border-radius: 8px; border: none; background: var(--primary-light); color: #fff; font-size: 13px; cursor: pointer; }
+  .redeem-message { font-size: 13px; margin-top: 12px; }
+  .auth-area { margin-bottom: 16px; }
+  .auth-status { font-size: 13px; color: var(--muted); display: flex; align-items: center; gap: 10px; margin: 0; }
+  .auth-link-btn { background: none; border: none; color: var(--primary); font-size: 13px; text-decoration: underline; cursor: pointer; padding: 0; }
+  .google-login-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    background: #fff;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 9px 16px;
+    font-size: 13px;
+    color: var(--ink);
+    cursor: pointer;
+  }
+  .google-login-btn:hover { background: #f5f3ee; }
+  .next-theme-row { display: flex; gap: 10px; margin-top: 20px; margin-bottom: 16px; }
+  .next-theme-btn {
+    display: block;
+    width: 100%;
+    padding: 10px;
+    border-radius: 8px;
+    border: 1px solid var(--primary-light);
+    background: var(--card-bg);
+    color: var(--primary-light);
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  .next-theme-btn:hover { background: #eef1f6; }
+  .random-theme-btn { border-color: var(--accent); color: var(--accent); }
+  .random-theme-btn:hover { background: var(--accent-bg); }
+  .theme-bookmark-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    background: var(--card-bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 8px 14px;
+    font-size: 13px;
+    color: var(--ink);
+    cursor: pointer;
+  }
+  .theme-bookmark-btn.active { color: #b8860b; border-color: #f2a93b; }
+</style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <h1>行政法 カード仕分けマスター</h1>
+  </header>
+  <div id="auth-area" class="auth-area"></div>
+
+  <div id="list-view">
+    <div class="filter-selectors">
+      <select id="filter-category-select"></select>
+    </div>
+    <div class="list-filters">
+      <button class="filter-btn active" data-filter="all">すべて</button>
+      <button class="filter-btn" data-filter="bookmark">★ ブックマーク</button>
+    </div>
+    <button class="sort-toggle-btn" id="sort-toggle-btn">正答率が低い順に並べ替え</button>
+    <div id="theme-list"></div>
+  </div>
+
+  <div id="practice-view" hidden>
+    <div class="practice-top-row">
+      <button class="back-link" id="back-to-list-btn">← 一覧へ戻る</button>
+      <button class="theme-bookmark-btn" id="theme-bookmark-btn">☆ このテーマをブックマーク</button>
+    </div>
+    <div class="mode-toggle-row">
+      <button class="reset-progress-btn" id="reset-progress-btn">🔄 このテーマの成績をリセット</button>
+      <button class="mode-toggle-btn" id="mode-toggle-btn">👁 閲覧モードにする</button>
+    </div>
+    <div id="theme-instruction">読み込み中...</div>
+    <div id="buckets" class="buckets"></div>
+    <p class="deck-hint" id="deck-hint">カードをタップ、またはドラッグしてバケツに仕分けてください</p>
+    <div id="deck" class="deck"></div>
+    <div id="lock-screen" class="lock-screen" hidden>
+      <div class="lock-icon">🔒</div>
+      <p class="lock-title">このテーマは有料会員限定です</p>
+      <p class="lock-desc">note の記事を購入すると、解除コードが手に入ります</p>
+      <a class="lock-button" href="https://note.com/YOUR_ARTICLE_URL" target="_blank" rel="noopener">note で購入する</a>
+      <div class="redeem-form">
+        <input type="text" id="redeem-code-input" placeholder="解除コードを入力">
+        <button id="redeem-code-btn">解除する</button>
+      </div>
+      <p id="redeem-message" class="redeem-message" hidden></p>
+    </div>
+    <div id="feedback" class="feedback" hidden></div>
+    <div class="next-theme-row">
+      <button class="next-theme-btn" id="next-theme-btn">次のテーマへ →</button>
+      <button class="next-theme-btn random-theme-btn" id="random-theme-btn">🎲 ランダムなテーマへ</button>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script>
+  // ── 1. Supabase接続設定 ──────────────────────────────
+  // Supabaseダッシュボード > Project Settings > API から取得して置き換える
+  const SUPABASE_URL = 'https://alrieisjlvvmlsocnjxw.supabase.co';
+  const SUPABASE_ANON_KEY = 'sb_publishable_YfXmxy7iZ_6B8mMRU2H39w_ky7HuS3N';
+  const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+  // ── 開発中の簡易ログイン(ログイン画面ができるまでの仮運用) ──
+  // Supabaseダッシュボード > Authentication > Users で自分用の
+  // テストアカウントを作成し、メール・パスワードを下に設定しておくと、
+  // 画面を作らずに「ログイン済み」の状態でブックマーク・履歴・
+  // 課金判定(entitlements)をそのままテストできる。
+  const DEV_TEST_EMAIL = ''; // 例: 'test@example.com'
+  const DEV_TEST_PASSWORD = ''; // 例: 'テスト用パスワード'
+
+  async function devSignIn() {
+    if (!DEV_TEST_EMAIL || !DEV_TEST_PASSWORD) return;
+    const { data: { session } } = await supabaseClient.auth.getSession();
+    if (session) return; // 既にログイン済みならスキップ(2回目以降はセッションが残る)
+    const { error } = await supabaseClient.auth.signInWithPassword({
+      email: DEV_TEST_EMAIL,
+      password: DEV_TEST_PASSWORD,
+    });
+    if (error) console.error('開発用ログインに失敗しました:', error.message);
+  }
+
+  // ── ログイン状態の表示・Googleログイン ──────────────
+  // Google OAuthを未設定の間は、ログインUI自体を非表示にしておく。
+  // Google Cloud ConsoleとSupabase側の設定が終わったらtrueへ切り替える。
+  const LOGIN_ENABLED = false;
+
+  function renderAuthArea(user) {
+    const el = document.getElementById('auth-area');
+    if (!LOGIN_ENABLED) {
+      el.hidden = true;
+      return;
+    }
+    el.hidden = false;
+    if (user) {
+      el.innerHTML = `<p class="auth-status">${user.email} でログイン中 <button class="auth-link-btn" id="logout-btn">ログアウト</button></p>`;
+      document.getElementById('logout-btn').addEventListener('click', async () => {
+        await supabaseClient.auth.signOut();
+      });
+    } else {
+      el.innerHTML = `
+        <button class="google-login-btn" id="google-login-btn">
+          <svg width="16" height="16" viewBox="0 0 48 48"><path fill="#EA4335" d="M24 9.5c3.5 0 6.6 1.2 9 3.6l6.7-6.7C35.9 2.4 30.4 0 24 0 14.6 0 6.5 5.4 2.5 13.2l7.8 6.1C12.2 13 17.6 9.5 24 9.5z"/><path fill="#4285F4" d="M46.5 24.5c0-1.6-.1-3.1-.4-4.5H24v9h12.7c-.5 3-2.2 5.4-4.7 7.1l7.4 5.7c4.3-4 6.8-9.9 6.8-17.3z"/><path fill="#FBBC05" d="M10.3 19.3A14.5 14.5 0 0 0 9.5 24c0 1.6.3 3.3.8 4.7l-7.8 6.1A24 24 0 0 1 0 24c0-3.9.9-7.6 2.5-10.8l7.8 6.1z"/><path fill="#34A853" d="M24 48c6.5 0 11.9-2.1 15.9-5.8l-7.4-5.7c-2.1 1.4-4.8 2.3-8.5 2.3-6.4 0-11.8-3.5-13.7-9.7l-7.8 6.1C6.5 42.6 14.6 48 24 48z"/></svg>
+          Googleでログイン
+        </button>
+      `;
+      document.getElementById('google-login-btn').addEventListener('click', async () => {
+        await supabaseClient.auth.signInWithOAuth({ provider: 'google' });
+      });
+    }
+  }
+
+  // ログイン・ログアウトのたびに、表示中のテーマと一覧の進捗を読み込み直す
+  supabaseClient.auth.onAuthStateChange((_event, session) => {
+    renderAuthArea(session?.user || null);
+    if (currentThemeId) loadTheme(currentThemeId);
+    loadUserProgress().then(() => {
+      if (document.getElementById('list-view').hidden === false) applyListFilter();
+    });
+  });
+
+  // 表示中の問題データをメモリに保持(タップのたびに再取得しないため)
+  let currentQuestions = [];
+  let selectedQuestionId = null;
+  let selectedCardEl = null;
+  let sortedIds = new Set();
+  let currentThemeId = null;
+  let currentListFilter = 'all'; // 'all' | 'bookmark'
+  let sortByAccuracy = false; // 正答率が低い順に並べ替えるかどうか
+  let themeSequence = []; // 全カテゴリを横断した「カテゴリ順→テーマ順」の一覧(ブックマーク・履歴を含む)
+  let categoryList = []; // カテゴリのプルダウン用一覧
+  let isViewMode = false; // 閲覧モード(最初から全カード仕分け済みの状態で表示。記録は保存しない)
+
+  // ── 一覧画面: カテゴリ横断のテーマ一覧・絞り込み・画面遷移 ──
+  async function buildThemeSequence() {
+    const [
+      { data: categories, error: catErr },
+      { data: themes, error: themeErr }
+    ] = await Promise.all([
+      supabaseClient.from('categories').select('*').order('sort_order'),
+      supabaseClient.from('themes').select('*').order('sort_order')
+    ]);
+    if (catErr) console.error('categories取得エラー:', catErr);
+    if (themeErr) console.error('themes取得エラー:', themeErr);
+    categoryList = categories || [];
+    themeSequence = [];
+    categoryList.forEach(c => {
+      (themes || [])
+        .filter(t => t.category_id === c.id)
+        .forEach(t => themeSequence.push({ ...t, categoryName: c.name, isBookmarked: false, accuracy: null, attemptCount: 0 }));
+    });
+    await loadUserProgress();
+  }
+
+  // テーマ単位のブックマーク・正答率を取得して themeSequence に反映する
+  async function loadUserProgress() {
+    const { data: { user } } = await supabaseClient.auth.getUser();
+    if (!user || !themeSequence.length) return;
+
+    const [
+      { data: bookmarks, error: bookmarkErr },
+      { data: accuracyRows, error: accuracyErr }
+    ] = await Promise.all([
+      supabaseClient.from('user_bookmarks').select('theme_id').eq('user_id', user.id),
+      supabaseClient.from('user_theme_accuracy').select('theme_id, total, correct').eq('user_id', user.id)
+    ]);
+    if (bookmarkErr) console.error('ブックマーク取得エラー:', bookmarkErr);
+    if (accuracyErr) console.error('正答率取得エラー:', accuracyErr);
+
+    const bookmarkedThemeIds = new Set((bookmarks || []).map(b => b.theme_id));
+
+    const totalCounts = {};
+    const correctCounts = {};
+    (accuracyRows || []).forEach(row => {
+      totalCounts[row.theme_id] = row.total;
+      correctCounts[row.theme_id] = row.correct;
+    });
+
+    themeSequence.forEach(t => {
+      t.isBookmarked = bookmarkedThemeIds.has(t.id);
+      const total = totalCounts[t.id] || 0;
+      const correct = correctCounts[t.id] || 0;
+      t.attemptCount = total;
+      t.accuracy = total > 0 ? correct / total : null; // 未挑戦はnull
+    });
+  }
+
+  async function initListView() {
+    await buildThemeSequence();
+    populateFilterSelectors();
+    renderThemeList('');
+  }
+
+  function populateFilterSelectors() {
+    const catSel = document.getElementById('filter-category-select');
+    catSel.innerHTML = '<option value="">すべてのカテゴリ</option>';
+    categoryList.forEach(c => {
+      const opt = document.createElement('option');
+      opt.value = c.id;
+      opt.textContent = c.name;
+      catSel.appendChild(opt);
+    });
+  }
+
+  function applyListFilter() {
+    const categoryId = document.getElementById('filter-category-select').value;
+    renderThemeList(categoryId);
+  }
+
+  function renderThemeList(categoryId) {
+    const el = document.getElementById('theme-list');
+    el.innerHTML = '';
+    const filtered = themeSequence.filter(t => {
+      if (categoryId && t.category_id !== categoryId) return false;
+      if (currentListFilter === 'bookmark') return t.isBookmarked;
+      return true;
+    });
+
+    if (!filtered.length) {
+      el.innerHTML = '<p class="list-empty">該当するテーマが見つかりません</p>';
+      return;
+    }
+
+    const groups = [];
+    filtered.forEach(t => {
+      let group = groups.find(g => g.categoryName === t.categoryName);
+      if (!group) {
+        group = { categoryName: t.categoryName, themes: [] };
+        groups.push(group);
+      }
+      group.themes.push(t);
+    });
+
+    if (sortByAccuracy) {
+      // カテゴリの区切りは保ったまま、各カテゴリの中だけ正答率が低い順(未挑戦は末尾)に並べ替える
+      groups.forEach(g => {
+        g.themes.sort((a, b) => {
+          if (a.accuracy === null && b.accuracy === null) return 0;
+          if (a.accuracy === null) return 1;
+          if (b.accuracy === null) return -1;
+          return a.accuracy - b.accuracy;
+        });
+      });
+    }
+
+    groups.forEach(g => {
+      const section = document.createElement('div');
+      section.className = 'category-group';
+
+      const heading = document.createElement('h2');
+      heading.className = 'category-heading';
+      heading.textContent = g.categoryName;
+      section.appendChild(heading);
+
+      g.themes.forEach(t => section.appendChild(buildThemeLink(t)));
+
+      el.appendChild(section);
+    });
+  }
+
+  function buildThemeLink(t) {
+    const link = document.createElement('a');
+    link.className = 'theme-link';
+    link.href = '#';
+
+    const accuracyText = t.accuracy === null ? '未挑戦' : `正答率 ${Math.round(t.accuracy * 100)}%`;
+
+    link.innerHTML = `
+      <span class="theme-link-main">
+        <span class="theme-link-star ${t.isBookmarked ? 'active' : ''}">${t.isBookmarked ? '★' : '☆'}</span>
+        <span>${t.title}</span>
+      </span>
+      <span class="theme-link-right">
+        <span class="theme-link-accuracy">${accuracyText}</span>
+        <span class="theme-link-arrow">→</span>
+      </span>
+    `;
+
+    link.querySelector('.theme-link-star').addEventListener('click', e => {
+      e.preventDefault();
+      e.stopPropagation();
+      toggleThemeBookmark(t);
+    });
+
+    link.addEventListener('click', e => {
+      e.preventDefault();
+      openTheme(t.id);
+    });
+
+    return link;
+  }
+
+  // ログイン済みユーザーのみブックマークをSupabaseに永続化する
+  async function toggleThemeBookmark(theme) {
+    const { data: { user } } = await supabaseClient.auth.getUser();
+    if (!user) return; // 未ログイン時は何もしない(今後ログイン導線を追加)
+
+    theme.isBookmarked = !theme.isBookmarked;
+    if (theme.isBookmarked) {
+      await supabaseClient.from('user_bookmarks').insert({ user_id: user.id, theme_id: theme.id });
+    } else {
+      await supabaseClient.from('user_bookmarks').delete().eq('user_id', user.id).eq('theme_id', theme.id);
+    }
+    applyListFilter();
+  }
+
+  // 仕分け画面上部のブックマークボタンの表示・トグル
+  function updateBookmarkButton() {
+    const theme = themeSequence.find(t => t.id === currentThemeId);
+    const btn = document.getElementById('theme-bookmark-btn');
+    if (!theme) return;
+    btn.textContent = theme.isBookmarked ? '★ ブックマーク済み' : '☆ このテーマをブックマーク';
+    btn.classList.toggle('active', theme.isBookmarked);
+  }
+
+  async function toggleCurrentThemeBookmark() {
+    const theme = themeSequence.find(t => t.id === currentThemeId);
+    if (!theme) return;
+    await toggleThemeBookmark(theme);
+    updateBookmarkButton();
+  }
+
+  // このテーマの解答履歴(正答率のもと)を丸ごと削除する。元に戻せないため確認を挟む
+  async function resetThemeProgress() {
+    const { data: { user } } = await supabaseClient.auth.getUser();
+    if (!user) {
+      alert('ログインしていないため、リセットする記録がありません。');
+      return;
+    }
+    if (!confirm('このテーマの正答率・解答履歴をリセットします。元に戻せませんが、よろしいですか？')) return;
+
+    await supabaseClient
+      .from('user_answer_logs')
+      .delete()
+      .eq('user_id', user.id)
+      .eq('theme_id', currentThemeId);
+
+    const theme = themeSequence.find(t => t.id === currentThemeId);
+    if (theme) {
+      theme.accuracy = null;
+      theme.attemptCount = 0;
+    }
+
+    // 今の画面上の状態(バケツに置いたカードなど)も合わせてリセットする
+    sortedIds = new Set();
+    document.querySelectorAll('.bucket-cards').forEach(el => { el.innerHTML = ''; });
+    document.getElementById('feedback').hidden = true;
+    renderDeck();
+
+    alert('リセットしました。');
+  }
+
+  function setupListFilters() {
+    document.querySelectorAll('.list-filters .filter-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        currentListFilter = btn.dataset.filter;
+        document.querySelectorAll('.list-filters .filter-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        applyListFilter();
+      });
+    });
+
+    const sortBtn = document.getElementById('sort-toggle-btn');
+    sortBtn.addEventListener('click', () => {
+      sortByAccuracy = !sortByAccuracy;
+      sortBtn.classList.toggle('active', sortByAccuracy);
+      sortBtn.textContent = sortByAccuracy ? 'カテゴリ順に戻す' : '正答率が低い順に並べ替え';
+      applyListFilter();
+    });
+  }
+
+  function openTheme(themeId) {
+    document.getElementById('list-view').hidden = true;
+    document.getElementById('practice-view').hidden = false;
+    updateModeToggleButton();
+    loadTheme(themeId);
+  }
+
+  function updateModeToggleButton() {
+    const btn = document.getElementById('mode-toggle-btn');
+    btn.textContent = isViewMode ? '✏️ 仕分けモードにする' : '👁 閲覧モードにする';
+    btn.classList.toggle('active', isViewMode);
+    document.getElementById('deck-hint').hidden = isViewMode;
+  }
+
+  async function showListView() {
+    document.getElementById('practice-view').hidden = true;
+    document.getElementById('list-view').hidden = false;
+    // 問題画面で解答した内容(正答率・ブックマーク)を一覧に反映し直す
+    await loadUserProgress();
+    applyListFilter();
+  }
+
+  // ── 全カテゴリ横断で「次のテーマへ」進む機能 ──────────
+  async function goToNextTheme() {
+    if (!themeSequence.length) await buildThemeSequence();
+    if (!themeSequence.length) return;
+    const currentIndex = themeSequence.findIndex(t => t.id === currentThemeId);
+    const next = themeSequence[(currentIndex + 1) % themeSequence.length];
+    loadTheme(next.id);
+  }
+
+  // 直前と同じテーマは避けつつ、無作為に1つ選ぶ
+  async function goToRandomTheme() {
+    if (!themeSequence.length) await buildThemeSequence();
+    if (!themeSequence.length) return;
+
+    const candidates = themeSequence.length > 1
+      ? themeSequence.filter(t => t.id !== currentThemeId)
+      : themeSequence;
+    const next = candidates[Math.floor(Math.random() * candidates.length)];
+    loadTheme(next.id);
+  }
+
+  // ── 2. テーマ(設問)の読み込み ─────────────────────────
+  async function loadTheme(themeId) {
+    currentThemeId = themeId;
+    // 通信を待つ間に前回の表示が一瞬残らないよう、真っ先にリセットする
+    document.getElementById('feedback').hidden = true;
+    document.getElementById('buckets').innerHTML = '';
+    document.getElementById('deck').innerHTML = '';
+    document.getElementById('theme-instruction').textContent = '読み込み中...';
+    document.getElementById('theme-bookmark-btn').textContent = '☆ このテーマをブックマーク';
+    document.getElementById('theme-bookmark-btn').classList.remove('active');
+
+    // 必要な取得をできるだけまとめて並列で走らせる
+    const [
+      { data: theme, error: themeErr },
+      { data: { user } },
+      { data: buckets },
+      { data: questions }
+    ] = await Promise.all([
+      supabaseClient.from('themes').select('*, categories(is_free)').eq('id', themeId).single(),
+      supabaseClient.auth.getUser(),
+      supabaseClient.from('buckets').select('*').eq('theme_id', themeId).order('sort_order'),
+      supabaseClient.from('questions').select('*').eq('theme_id', themeId)
+    ]);
+    // 待っている間に別のテーマへ切り替わっていたら、この結果は使わずに中断する
+    if (themeId !== currentThemeId) return;
+    if (themeErr) return console.error(themeErr);
+
+    // ログイン済みなら課金状態(entitlements)も確認する(user.idが分かってから)
+    let isPremium = false;
+    if (user) {
+      const { data: ent } = await supabaseClient
+        .from('entitlements')
+        .select('is_premium')
+        .eq('user_id', user.id)
+        .maybeSingle();
+      isPremium = ent?.is_premium || false;
+    }
+    if (themeId !== currentThemeId) return;
+
+    const isFreeCategory = theme.categories?.is_free || false;
+    const locked = !isFreeCategory && !isPremium;
+
+    // ここまでで必要なデータが全部揃ったので、まとめて画面を更新する
+    document.getElementById('theme-instruction').textContent = theme.instruction;
+    updateBookmarkButton();
+
+    if (locked) {
+      showLockScreen();
+      return;
+    }
+    hideLockScreen();
+
+    if (isViewMode) {
+      // 閲覧モード: シャッフルせず登録順で、最初から全問を仕分け済みとして表示する
+      currentQuestions = (questions || []).slice().sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0));
+      sortedIds = new Set(currentQuestions.map(q => q.id));
+    } else {
+      currentQuestions = shuffleArray(questions || []);
+      sortedIds = new Set();
+    }
+    selectedQuestionId = null;
+    selectedCardEl = null;
+    renderBuckets(buckets || []);
+    renderDeck();
+  }
+
+  // Fisher-Yatesアルゴリズムで配列をシャッフルする(この配列自体を並べ替える)
+  function shuffleArray(array) {
+    for (let i = array.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [array[i], array[j]] = [array[j], array[i]];
+    }
+    return array;
+  }
+
+  // ロック画面と学習画面の出し分け
+  function showLockScreen() {
+    document.getElementById('buckets').hidden = true;
+    document.getElementById('deck').hidden = true;
+    document.getElementById('lock-screen').hidden = false;
+  }
+  function hideLockScreen() {
+    document.getElementById('buckets').hidden = false;
+    document.getElementById('deck').hidden = false;
+    document.getElementById('lock-screen').hidden = true;
+  }
+
+  // ── 3. バケツの描画(タップ/ドロップの両方を受け付ける) ───
+  function renderBuckets(buckets) {
+    const el = document.getElementById('buckets');
+    el.innerHTML = '';
+    buckets.forEach(bucket => {
+      const div = document.createElement('div');
+      div.className = 'bucket';
+      div.dataset.bucketId = bucket.id;
+      div.innerHTML = `<h3>${bucket.title}</h3><div class="bucket-cards"></div>`;
+
+      // タップで仕分け(カード選択済みの場合)
+      div.addEventListener('click', () => {
+        if (selectedQuestionId) handleAnswer(selectedQuestionId, bucket.id);
+      });
+
+      // ドラッグ&ドロップで仕分け(PC向け)
+      div.addEventListener('dragover', e => { e.preventDefault(); div.classList.add('drag-over'); });
+      div.addEventListener('dragleave', () => div.classList.remove('drag-over'));
+      div.addEventListener('drop', e => {
+        e.preventDefault();
+        div.classList.remove('drag-over');
+        const questionId = e.dataTransfer.getData('text/plain');
+        handleAnswer(questionId, bucket.id);
+      });
+
+      el.appendChild(div);
+    });
+
+    // 閲覧モード: 描画直後に、全問題を正解のバケツへ最初から差し込んでおく
+    if (isViewMode) {
+      currentQuestions.forEach(q => {
+        const bucketCardsEl = document.querySelector(`.bucket[data-bucket-id="${q.answer_bucket_id}"] .bucket-cards`);
+        if (!bucketCardsEl) return;
+        const chip = document.createElement('div');
+        chip.className = 'card sorted';
+        chip.textContent = q.card_text;
+        chip.addEventListener('click', () => showFeedback(null, q.explanation));
+        bucketCardsEl.appendChild(chip);
+      });
+    }
+  }
+
+  // ── 4. 問題カードの描画 ──────────────────────────────
+  function renderDeck() {
+    const el = document.getElementById('deck');
+    el.innerHTML = '';
+    currentQuestions
+      .filter(q => !sortedIds.has(q.id))
+      .forEach(q => {
+        const card = document.createElement('div');
+        card.className = 'card';
+        card.textContent = q.card_text;
+        card.draggable = true;
+        card.dataset.questionId = q.id;
+
+        card.addEventListener('click', () => selectCard(q.id, card));
+        card.addEventListener('dragstart', e => e.dataTransfer.setData('text/plain', q.id));
+
+        el.appendChild(card);
+      });
+  }
+
+  function selectCard(questionId, cardEl) {
+    if (cardEl.classList.contains('sorted')) return;
+    if (selectedCardEl) selectedCardEl.classList.remove('selected');
+    selectedQuestionId = questionId;
+    selectedCardEl = cardEl;
+    cardEl.classList.add('selected');
+  }
+
+  // ── 5. 正誤判定・フィードバック・ログ保存 ────────────────
+  async function handleAnswer(questionId, bucketId) {
+    const question = currentQuestions.find(q => q.id === questionId);
+    if (!question) return;
+
+    const isCorrect = question.answer_bucket_id === bucketId;
+    showFeedback(isCorrect, question.explanation);
+
+    if (isCorrect) {
+      sortedIds.add(questionId);
+      const bucketCardsEl = document.querySelector(`.bucket[data-bucket-id="${bucketId}"] .bucket-cards`);
+      if (bucketCardsEl) {
+        const chip = document.createElement('div');
+        chip.className = 'card sorted';
+        chip.textContent = question.card_text;
+        // 仕分け済みのカードも、タップすればいつでも解説を見返せるようにする
+        chip.addEventListener('click', () => {
+          showFeedback(null, question.explanation);
+        });
+        bucketCardsEl.appendChild(chip);
+      }
+    }
+
+    // 通信を待たず、画面の更新はここで即座に行う
+    selectedQuestionId = null;
+    selectedCardEl = null;
+    renderDeck();
+
+    // ログイン済みユーザーのみ解答ログを保存(画面表示とは切り離し、裏側で行う)
+    const { data: { user } } = await supabaseClient.auth.getUser();
+    if (user) {
+      const { error: logError } = await supabaseClient.from('user_answer_logs').insert({
+        user_id: user.id,
+        theme_id: currentThemeId,
+        question_id: questionId,
+        selected_bucket_id: bucketId,
+        is_correct: isCorrect
+      });
+      if (logError) console.error('解答ログの保存に失敗しました:', logError);
+    } else {
+      console.warn('未ログインのため、解答ログは保存されません。');
+    }
+  }
+
+  // isCorrectがnullのときは「復習モード」(正誤ラベルを出さず、解説だけ見せる)
+  function showFeedback(isCorrect, explanation) {
+    const el = document.getElementById('feedback');
+    el.hidden = false;
+    if (isCorrect === null) {
+      el.textContent = explanation;
+      el.className = 'feedback review';
+    } else {
+      el.textContent = explanation;
+      el.className = 'feedback ' + (isCorrect ? 'correct' : 'incorrect');
+    }
+    // カードの枚数が多いとき、解説がデッキの下に隠れて見落とされないよう自動スクロール
+    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }
+
+  // ── 6. 初期表示 ─────────────────────────────────────
+  document.getElementById('back-to-list-btn').addEventListener('click', showListView);
+  document.getElementById('filter-category-select').addEventListener('change', applyListFilter);
+  document.getElementById('theme-bookmark-btn').addEventListener('click', toggleCurrentThemeBookmark);
+  document.getElementById('reset-progress-btn').addEventListener('click', resetThemeProgress);
+  document.getElementById('mode-toggle-btn').addEventListener('click', () => {
+    isViewMode = !isViewMode;
+    updateModeToggleButton();
+    if (currentThemeId) loadTheme(currentThemeId);
+  });
+  document.getElementById('next-theme-btn').addEventListener('click', goToNextTheme);
+  document.getElementById('random-theme-btn').addEventListener('click', goToRandomTheme);
+  document.getElementById('redeem-code-btn').addEventListener('click', async () => {
+    const code = document.getElementById('redeem-code-input').value.trim();
+    const msgEl = document.getElementById('redeem-message');
+    if (!code) return;
+
+    const { data: { user } } = await supabaseClient.auth.getUser();
+    if (!user) {
+      msgEl.hidden = false;
+      msgEl.textContent = '先にログインしてください。';
+      return;
+    }
+
+    const { data, error } = await supabaseClient.functions.invoke('redeem-code', { body: { code } });
+    msgEl.hidden = false;
+    if (error || data?.error) {
+      msgEl.textContent = 'コードが正しくないか、エラーが発生しました。';
+    } else {
+      msgEl.textContent = '解除しました。反映しています…';
+      if (currentThemeId) loadTheme(currentThemeId);
+    }
+  });
+  setupListFilters();
+  devSignIn().then(initListView);</script>
+</body>
+</html>
