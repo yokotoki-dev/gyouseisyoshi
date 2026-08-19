@@ -38,6 +38,16 @@
     margin: 0 0 4px;
   }
   header p { color: var(--muted); font-size: 14px; margin: 0 0 20px; }
+  .announcement {
+    background: var(--accent-bg);
+    color: var(--accent);
+    border: 1px solid var(--accent);
+    border-radius: 8px;
+    padding: 10px 14px;
+    font-size: 13px;
+    margin-bottom: 16px;
+    white-space: pre-line;
+  }
   .deck-hint { color: var(--muted); font-size: 13px; margin: 0 0 10px; }
   .filter-selectors { display: flex; gap: 10px; margin-bottom: 20px; }
   .filter-selectors select { flex: 1; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--border); background: var(--card-bg); font-size: 14px; }
@@ -260,6 +270,7 @@
   <header>
     <h1>ヨコトキ　行政書士</h1>
   </header>
+  <div id="announcement" class="announcement" hidden></div>
   <div id="auth-area" class="auth-area"></div>
 
   <div id="list-view">
@@ -340,6 +351,29 @@
       password: DEV_TEST_PASSWORD,
     });
     if (error) console.error('開発用ログインに失敗しました:', error.message);
+  }
+
+  // ── お知らせ ─────────────────────────────────────
+  // is_active = trueの行があれば、画面上部に表示する。文言はTable Editorから編集する。
+  async function loadAnnouncement() {
+    const el = document.getElementById('announcement');
+    const { data, error } = await supabaseClient
+      .from('announcements')
+      .select('message')
+      .eq('is_active', true)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (error) {
+      console.error('お知らせ取得エラー:', error);
+      return;
+    }
+    if (data) {
+      el.textContent = data.message;
+      el.hidden = false;
+    } else {
+      el.hidden = true;
+    }
   }
 
   // ── ログイン状態の表示・Googleログイン ──────────────
@@ -949,6 +983,7 @@
   });
   setupListFilters();
   updateListModeToggleButton();
+  loadAnnouncement();
   devSignIn().then(initListView);</script>
 </body>
 </html>
