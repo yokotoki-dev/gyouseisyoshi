@@ -430,6 +430,7 @@
   let isViewMode = false; // 閲覧モード(最初から全カード仕分け済みの状態で表示。記録は保存しない)
   let activeThemeCategoryId = ''; // 問題画面での「次へ・ランダム」の対象範囲(カテゴリ)。空なら全カテゴリ横断
   let activeThemeBookmarkOnly = false; // 問題画面での「次へ・ランダム」の対象範囲(ブックマークのみか)
+  let activeThemeSortByAccuracy = false; // 問題画面での「次へ」の並び順(正答率が低い順か)
 
   // ── 一覧画面: カテゴリ横断のテーマ一覧・絞り込み・画面遷移 ──
   async function buildThemeSequence() {
@@ -673,9 +674,10 @@
     document.getElementById('list-view').hidden = true;
     document.getElementById('practice-view').hidden = false;
     updateModeToggleButton();
-    // 一覧画面で絞り込んでいたカテゴリ・ブックマークを、次へ・ランダムの対象範囲として引き継ぐ
+    // 一覧画面で絞り込んでいたカテゴリ・ブックマーク・並び順を、次へ・ランダムの対象範囲として引き継ぐ
     activeThemeCategoryId = document.getElementById('filter-category-select').value;
     activeThemeBookmarkOnly = currentListFilter === 'bookmark';
+    activeThemeSortByAccuracy = sortByAccuracy;
     loadTheme(themeId);
   }
 
@@ -703,11 +705,21 @@
 
   // 一覧画面での絞り込み(カテゴリ・ブックマーク)を、次へ・ランダムの対象範囲に適用する
   function getActiveThemePool() {
-    return themeSequence.filter(t => {
+    const pool = themeSequence.filter(t => {
       if (activeThemeCategoryId && t.category_id !== activeThemeCategoryId) return false;
       if (activeThemeBookmarkOnly && !t.isBookmarked) return false;
       return true;
     });
+    if (activeThemeSortByAccuracy) {
+      // 一覧画面と同じ基準: 正答率が低い順(未挑戦は末尾)に並べ替える
+      pool.sort((a, b) => {
+        if (a.accuracy === null && b.accuracy === null) return 0;
+        if (a.accuracy === null) return 1;
+        if (b.accuracy === null) return -1;
+        return a.accuracy - b.accuracy;
+      });
+    }
+    return pool;
   }
 
   // ── 「次のテーマへ」進む機能(一覧画面での絞り込みを引き継いだ範囲内だけを回る) ──
