@@ -428,6 +428,7 @@
   let themeSequence = []; // 全カテゴリを横断した「カテゴリ順→テーマ順」の一覧(ブックマーク・履歴を含む)
   let categoryList = []; // カテゴリのプルダウン用一覧
   let isViewMode = false; // 閲覧モード(最初から全カード仕分け済みの状態で表示。記録は保存しない)
+  let activeThemeCategoryId = ''; // 問題画面での「次へ・ランダム」の対象範囲。空なら全カテゴリ横断
 
   // ── 一覧画面: カテゴリ横断のテーマ一覧・絞り込み・画面遷移 ──
   async function buildThemeSequence() {
@@ -671,6 +672,8 @@
     document.getElementById('list-view').hidden = true;
     document.getElementById('practice-view').hidden = false;
     updateModeToggleButton();
+    // 一覧画面で絞り込んでいたカテゴリを、次へ・ランダムの対象範囲として引き継ぐ
+    activeThemeCategoryId = document.getElementById('filter-category-select').value;
     loadTheme(themeId);
   }
 
@@ -696,23 +699,31 @@
     applyListFilter();
   }
 
-  // ── 全カテゴリ横断で「次のテーマへ」進む機能 ──────────
+  // ── 「次のテーマへ」進む機能(カテゴリを絞り込んで開いていれば、その範囲内だけを回る) ──
   async function goToNextTheme() {
     if (!themeSequence.length) await buildThemeSequence();
     if (!themeSequence.length) return;
-    const currentIndex = themeSequence.findIndex(t => t.id === currentThemeId);
-    const next = themeSequence[(currentIndex + 1) % themeSequence.length];
+    const pool = activeThemeCategoryId
+      ? themeSequence.filter(t => t.category_id === activeThemeCategoryId)
+      : themeSequence;
+    if (!pool.length) return;
+    const currentIndex = pool.findIndex(t => t.id === currentThemeId);
+    const next = pool[(currentIndex + 1) % pool.length];
     loadTheme(next.id);
   }
 
-  // 直前と同じテーマは避けつつ、無作為に1つ選ぶ
+  // 直前と同じテーマは避けつつ、無作為に1つ選ぶ(こちらも絞り込みの範囲内で行う)
   async function goToRandomTheme() {
     if (!themeSequence.length) await buildThemeSequence();
     if (!themeSequence.length) return;
 
-    const candidates = themeSequence.length > 1
-      ? themeSequence.filter(t => t.id !== currentThemeId)
+    const pool = activeThemeCategoryId
+      ? themeSequence.filter(t => t.category_id === activeThemeCategoryId)
       : themeSequence;
+    if (!pool.length) return;
+    const candidates = pool.length > 1
+      ? pool.filter(t => t.id !== currentThemeId)
+      : pool;
     const next = candidates[Math.floor(Math.random() * candidates.length)];
     loadTheme(next.id);
   }
