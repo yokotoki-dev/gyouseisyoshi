@@ -428,7 +428,8 @@
   let themeSequence = []; // 全カテゴリを横断した「カテゴリ順→テーマ順」の一覧(ブックマーク・履歴を含む)
   let categoryList = []; // カテゴリのプルダウン用一覧
   let isViewMode = false; // 閲覧モード(最初から全カード仕分け済みの状態で表示。記録は保存しない)
-  let activeThemeCategoryId = ''; // 問題画面での「次へ・ランダム」の対象範囲。空なら全カテゴリ横断
+  let activeThemeCategoryId = ''; // 問題画面での「次へ・ランダム」の対象範囲(カテゴリ)。空なら全カテゴリ横断
+  let activeThemeBookmarkOnly = false; // 問題画面での「次へ・ランダム」の対象範囲(ブックマークのみか)
 
   // ── 一覧画面: カテゴリ横断のテーマ一覧・絞り込み・画面遷移 ──
   async function buildThemeSequence() {
@@ -672,8 +673,9 @@
     document.getElementById('list-view').hidden = true;
     document.getElementById('practice-view').hidden = false;
     updateModeToggleButton();
-    // 一覧画面で絞り込んでいたカテゴリを、次へ・ランダムの対象範囲として引き継ぐ
+    // 一覧画面で絞り込んでいたカテゴリ・ブックマークを、次へ・ランダムの対象範囲として引き継ぐ
     activeThemeCategoryId = document.getElementById('filter-category-select').value;
+    activeThemeBookmarkOnly = currentListFilter === 'bookmark';
     loadTheme(themeId);
   }
 
@@ -699,13 +701,20 @@
     applyListFilter();
   }
 
-  // ── 「次のテーマへ」進む機能(カテゴリを絞り込んで開いていれば、その範囲内だけを回る) ──
+  // 一覧画面での絞り込み(カテゴリ・ブックマーク)を、次へ・ランダムの対象範囲に適用する
+  function getActiveThemePool() {
+    return themeSequence.filter(t => {
+      if (activeThemeCategoryId && t.category_id !== activeThemeCategoryId) return false;
+      if (activeThemeBookmarkOnly && !t.isBookmarked) return false;
+      return true;
+    });
+  }
+
+  // ── 「次のテーマへ」進む機能(一覧画面での絞り込みを引き継いだ範囲内だけを回る) ──
   async function goToNextTheme() {
     if (!themeSequence.length) await buildThemeSequence();
     if (!themeSequence.length) return;
-    const pool = activeThemeCategoryId
-      ? themeSequence.filter(t => t.category_id === activeThemeCategoryId)
-      : themeSequence;
+    const pool = getActiveThemePool();
     if (!pool.length) return;
     const currentIndex = pool.findIndex(t => t.id === currentThemeId);
     const next = pool[(currentIndex + 1) % pool.length];
@@ -717,9 +726,7 @@
     if (!themeSequence.length) await buildThemeSequence();
     if (!themeSequence.length) return;
 
-    const pool = activeThemeCategoryId
-      ? themeSequence.filter(t => t.category_id === activeThemeCategoryId)
-      : themeSequence;
+    const pool = getActiveThemePool();
     if (!pool.length) return;
     const candidates = pool.length > 1
       ? pool.filter(t => t.id !== currentThemeId)
