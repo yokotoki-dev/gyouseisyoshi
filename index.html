@@ -132,6 +132,7 @@
   .mode-badge.view { background: var(--review-bg); color: var(--primary); }
   .filter-btn { flex: 1; padding: 10px; border-radius: 20px; border: 1px solid var(--border); background: var(--card-bg); font-size: 13px; cursor: pointer; text-align: center; }
   .filter-btn.active { background: var(--primary); color: #fff; border-color: var(--primary); }
+  .theme-breadcrumb { color: var(--muted); font-size: 12px; margin: 0 0 6px; }
   #theme-instruction {
     background: var(--card-bg);
     border: 1px solid var(--border);
@@ -305,6 +306,7 @@
         <button class="mode-toggle-btn" id="mode-toggle-btn">モード切替</button>
       </div>
     </div>
+    <p id="theme-breadcrumb" class="theme-breadcrumb"></p>
     <div id="theme-instruction">読み込み中...</div>
     <div id="buckets" class="buckets"></div>
     <p class="deck-hint" id="deck-hint">カードをタップ、またはドラッグしてバケツに仕分けてください</p>
@@ -755,6 +757,7 @@
     document.getElementById('buckets').innerHTML = '';
     document.getElementById('deck').innerHTML = '';
     document.getElementById('theme-instruction').textContent = '読み込み中...';
+    document.getElementById('theme-breadcrumb').textContent = '';
     document.getElementById('theme-bookmark-btn').textContent = '☆ このテーマをブックマーク';
     document.getElementById('theme-bookmark-btn').classList.remove('active');
 
@@ -765,7 +768,7 @@
       { data: buckets },
       { data: questions }
     ] = await Promise.all([
-      supabaseClient.from('themes').select('*, categories(is_free)').eq('id', themeId).single(),
+      supabaseClient.from('themes').select('*, categories(is_free, name)').eq('id', themeId).single(),
       supabaseClient.auth.getUser(),
       supabaseClient.from('buckets').select('*').eq('theme_id', themeId).order('sort_order'),
       supabaseClient.from('questions').select('*').eq('theme_id', themeId)
@@ -791,6 +794,7 @@
 
     // ここまでで必要なデータが全部揃ったので、まとめて画面を更新する
     document.getElementById('theme-instruction').textContent = theme.instruction;
+    document.getElementById('theme-breadcrumb').textContent = `${theme.categories?.name || ''} › ${theme.title}`;
     updateBookmarkButton();
 
     if (locked) {
