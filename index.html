@@ -383,7 +383,7 @@
   // ── ログイン状態の表示・Googleログイン ──────────────
   // Google OAuthを未設定の間は、ログインUI自体を非表示にしておく。
   // Google Cloud ConsoleとSupabase側の設定が終わったらtrueへ切り替える。
-  const LOGIN_ENABLED = false;
+  const LOGIN_ENABLED = true;
 
   function renderAuthArea(user) {
     const el = document.getElementById('auth-area');
