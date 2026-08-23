@@ -1080,6 +1080,14 @@
   setupListFilters();
   updateListModeToggleButton();
   loadAnnouncement();
+
+  // カード・バケツ以外の何もない場所をタップしたら、選択中の状態をまとめて解除する
+  document.addEventListener('click', e => {
+    if (e.target.closest('.card') || e.target.closest('.bucket')) return;
+    clearCardSelection();
+    clearBucketSelection();
+  });
+
   devSignIn().then(initListView);</script>
 </body>
 </html>
