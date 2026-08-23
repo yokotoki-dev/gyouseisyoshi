@@ -702,9 +702,9 @@
 
     function updateSortButtons() {
       sortBtn.classList.toggle('active', sortMode === 'accuracy');
-      sortBtn.textContent = sortMode === 'accuracy' ? 'カテゴリ順に戻す' : '正答率が低い順に並べ替え';
+      sortBtn.textContent = sortMode === 'accuracy' ? 'テーマ順に戻す' : '正答率が低い順に並べ替え';
       sortByDateBtn.classList.toggle('active', sortMode === 'lastAnswered');
-      sortByDateBtn.textContent = sortMode === 'lastAnswered' ? 'カテゴリ順に戻す' : '最終回答日が古い順に並べ替え';
+      sortByDateBtn.textContent = sortMode === 'lastAnswered' ? 'テーマ順に戻す' : '最終回答日が古い順に並べ替え';
     }
 
     sortBtn.addEventListener('click', () => {
