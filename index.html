@@ -50,7 +50,7 @@
     margin-bottom: 16px;
     white-space: pre-line;
   }
-  .deck-hint { color: var(--muted); font-size: 13px; margin: 0 0 10px; }
+  .deck-hint { color: var(--muted); font-size: 13px; margin: 0 0 10px; white-space: pre-line; line-height: 1.6; }
   .filter-selectors { display: flex; gap: 10px; margin-bottom: 20px; }
   .filter-selectors select { flex: 1; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--border); background: var(--card-bg); font-size: 14px; }
   .category-group { margin-bottom: 20px; }
@@ -162,6 +162,7 @@
     user-select: none;
   }
   .bucket.drag-over { border-color: var(--primary-light); background: #eef4fa; }
+  .bucket.selected { border-color: var(--primary-light); background: #eef4fa; box-shadow: 0 0 0 2px var(--primary-light) inset; }
   .bucket-cards { display: flex; flex-wrap: wrap; gap: 6px; justify-content: center; }
   .card.sorted {
     cursor: pointer;
@@ -309,7 +310,9 @@
     <p id="theme-breadcrumb" class="theme-breadcrumb"></p>
     <div id="theme-instruction">読み込み中...</div>
     <div id="buckets" class="buckets"></div>
-    <p class="deck-hint" id="deck-hint">カードをタップ、またはドラッグしてバケツに仕分けてください</p>
+    <p class="deck-hint" id="deck-hint">下のカードを、上のバケツに仕分けましょう。
+カードを選び、どのバケツに入れるかを選んで仕分けるか、
+バケツを選び、中に入るカードを選んで仕分けることができます。</p>
     <div id="deck" class="deck"></div>
     <div id="lock-screen" class="lock-screen" hidden>
       <div class="lock-icon">🔒</div>
@@ -383,7 +386,7 @@
   // ── ログイン状態の表示・Googleログイン ──────────────
   // Google OAuthを未設定の間は、ログインUI自体を非表示にしておく。
   // Google Cloud ConsoleとSupabase側の設定が終わったらtrueへ切り替える。
-  const LOGIN_ENABLED = true;
+  const LOGIN_ENABLED = false;
 
   function renderAuthArea(user) {
     const el = document.getElementById('auth-area');
@@ -423,6 +426,8 @@
   let currentQuestions = [];
   let selectedQuestionId = null;
   let selectedCardEl = null;
+  let selectedBucketId = null;
+  let selectedBucketEl = null;
   let sortedIds = new Set();
   let currentThemeId = null;
   let currentListFilter = 'all'; // 'all' | 'bookmark'
@@ -646,6 +651,8 @@
 
     // 今の画面上の状態(バケツに置いたカードなど)も合わせてリセットする
     sortedIds = new Set();
+    clearCardSelection();
+    clearBucketSelection();
     document.querySelectorAll('.bucket-cards').forEach(el => { el.innerHTML = ''; });
     document.getElementById('feedback').hidden = true;
     renderDeck();
@@ -813,6 +820,8 @@
     }
     selectedQuestionId = null;
     selectedCardEl = null;
+    selectedBucketId = null;
+    selectedBucketEl = null;
     renderBuckets(buckets || []);
     renderDeck();
   }
@@ -854,7 +863,7 @@
         div.innerHTML = `<h3 class="bucket-title">${bucket.title}</h3><div class="bucket-cards"></div>`;
       }
 
-      // タップで仕分け(カード選択済みの場合)、または閲覧モードでの見出し表示切り替え
+      // タップで仕分け(カード選択済みの場合)、バケツを先に選ぶ操作、または閲覧モードでの見出し表示切り替え
       div.addEventListener('click', e => {
         const titleEl = div.querySelector('.bucket-title');
         if (isViewMode && titleEl.classList.contains('masked') && e.target === titleEl) {
@@ -862,7 +871,27 @@
           titleEl.textContent = titleEl.dataset.title;
           return;
         }
-        if (selectedQuestionId) handleAnswer(selectedQuestionId, bucket.id);
+        if (isViewMode) return;
+
+        // すでにカードを選択中なら、バケツを選んだ瞬間に判定する(カード→バケツの順、従来通り)
+        if (selectedQuestionId) {
+          const questionId = selectedQuestionId;
+          clearCardSelection();
+          handleAnswer(questionId, bucket.id);
+          return;
+        }
+
+        // 同じバケツをもう一度タップしたら、選択をキャンセルする
+        if (selectedBucketId === bucket.id) {
+          clearBucketSelection();
+          return;
+        }
+
+        // バケツを先に選ぶ(バケツ→カードの順)
+        if (selectedBucketEl) selectedBucketEl.classList.remove('selected');
+        selectedBucketId = bucket.id;
+        selectedBucketEl = div;
+        div.classList.add('selected');
       });
 
       // ドラッグ&ドロップで仕分け(PC向け)
@@ -886,7 +915,10 @@
         const chip = document.createElement('div');
         chip.className = 'card sorted';
         chip.textContent = q.card_text;
-        chip.addEventListener('click', () => showFeedback(null, q.explanation));
+        chip.addEventListener('click', e => {
+          e.stopPropagation();
+          showFeedback(null, q.explanation);
+        });
         bucketCardsEl.appendChild(chip);
       });
     }
@@ -914,10 +946,36 @@
 
   function selectCard(questionId, cardEl) {
     if (cardEl.classList.contains('sorted')) return;
+
+    // すでにバケツを選択中なら、カードを選んだ瞬間に判定する(バケツ→カードの順)
+    // バケツの選択は解除せず、続けて他のカードもそのバケツに入れられるようにする
+    if (selectedBucketId) {
+      handleAnswer(questionId, selectedBucketId);
+      return;
+    }
+
+    // 同じカードをもう一度タップしたら、選択をキャンセルする
+    if (selectedQuestionId === questionId) {
+      clearCardSelection();
+      return;
+    }
+
     if (selectedCardEl) selectedCardEl.classList.remove('selected');
     selectedQuestionId = questionId;
     selectedCardEl = cardEl;
     cardEl.classList.add('selected');
+  }
+
+  function clearCardSelection() {
+    if (selectedCardEl) selectedCardEl.classList.remove('selected');
+    selectedQuestionId = null;
+    selectedCardEl = null;
+  }
+
+  function clearBucketSelection() {
+    if (selectedBucketEl) selectedBucketEl.classList.remove('selected');
+    selectedBucketId = null;
+    selectedBucketEl = null;
   }
 
   // ── 5. 正誤判定・フィードバック・ログ保存 ────────────────
@@ -936,7 +994,8 @@
         chip.className = 'card sorted';
         chip.textContent = question.card_text;
         // 仕分け済みのカードも、タップすればいつでも解説を見返せるようにする
-        chip.addEventListener('click', () => {
+        chip.addEventListener('click', e => {
+          e.stopPropagation();
           showFeedback(null, question.explanation);
         });
         bucketCardsEl.appendChild(chip);
@@ -944,6 +1003,7 @@
     }
 
     // 通信を待たず、画面の更新はここで即座に行う
+    // (バケツの選択は解除しない。続けて同じバケツに他のカードを入れられるようにするため)
     selectedQuestionId = null;
     selectedCardEl = null;
     renderDeck();
