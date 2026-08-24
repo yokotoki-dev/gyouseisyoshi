@@ -69,7 +69,7 @@
     font-size: 14px;
     transition: border-color .15s;
   }
-  .theme-link:hover { border-color: var(--primary-light); }
+  @media (hover: hover) { .theme-link:hover { border-color: var(--primary-light); } }
   .theme-link-main { display: flex; align-items: center; gap: 8px; }
   .theme-link-star { cursor: pointer; color: #c9ccd1; font-size: 16px; line-height: 1; }
   .theme-link-star.active { color: #f2a93b; }
@@ -149,7 +149,7 @@
     background: var(--card-bg);
     border: 2px dashed var(--border);
     border-radius: 10px;
-    padding: 12px;
+    padding: 12px 12px 40px;
     text-align: center;
     cursor: pointer;
     transition: border-color .15s, background .15s;
@@ -164,7 +164,7 @@
   }
   .bucket.drag-over { border-style: solid; border-color: var(--primary-light); background: #eef4fa; }
   .bucket.selected { border-style: solid; border-color: var(--primary-light); background: #eef4fa; box-shadow: 0 0 0 2px var(--primary-light) inset; }
-  .bucket-cards { display: flex; flex-wrap: wrap; gap: 6px; justify-content: center; }
+  .bucket-cards { display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; }
   .card.sorted {
     cursor: pointer;
     font-size: 12px;
@@ -173,7 +173,7 @@
     border-color: var(--border);
     color: var(--ink);
   }
-  .card.sorted:hover { border-color: var(--primary-light); }
+  @media (hover: hover) { .card.sorted:hover { border-color: var(--primary-light); } }
   .deck { display: flex; flex-wrap: wrap; gap: 10px; }
   .card {
     background: var(--card-bg);
@@ -218,7 +218,7 @@
     font-weight: 600;
     cursor: pointer;
   }
-  .lock-button:hover { background: var(--primary-light); }
+  @media (hover: hover) { .lock-button:hover { background: var(--primary-light); } }
   .redeem-form { display: flex; gap: 8px; margin: 20px auto 0; max-width: 320px; }
   .redeem-form input { flex: 1; padding: 10px; border-radius: 8px; border: 1px solid var(--border); font-size: 13px; }
   .redeem-form button { padding: 10px 16px; border-radius: 8px; border: none; background: var(--primary-light); color: #fff; font-size: 13px; cursor: pointer; }
@@ -238,7 +238,7 @@
     color: var(--ink);
     cursor: pointer;
   }
-  .google-login-btn:hover { background: #f5f3ee; }
+  @media (hover: hover) { .google-login-btn:hover { background: #f5f3ee; } }
   .next-theme-row { display: flex; gap: 10px; margin-top: 20px; margin-bottom: 16px; }
   .next-theme-btn {
     display: block;
@@ -252,9 +252,9 @@
     font-weight: 600;
     cursor: pointer;
   }
-  .next-theme-btn:hover { background: #eef1f6; }
+  @media (hover: hover) { .next-theme-btn:hover { background: #eef1f6; } }
   .random-theme-btn { border-color: var(--accent); color: var(--accent); }
-  .random-theme-btn:hover { background: var(--accent-bg); }
+  @media (hover: hover) { .random-theme-btn:hover { background: var(--accent-bg); } }
   .theme-bookmark-btn {
     display: inline-flex;
     align-items: center;
@@ -533,6 +533,31 @@
 
     if (!filtered.length) {
       el.innerHTML = '<p class="list-empty">該当するテーマが見つかりません</p>';
+      return;
+    }
+
+    // 「すべてのカテゴリ」で、かつ並べ替え中は、カテゴリの区切りを取り払い、
+    // 横断的な1つの順番で表示する(「次へ」の挙動と一致させるため)
+    const isCrossCategorySort = !categoryId && sortMode !== 'none';
+
+    if (isCrossCategorySort) {
+      const sorted = filtered.slice();
+      if (sortMode === 'accuracy') {
+        sorted.sort((a, b) => {
+          if (a.accuracy === null && b.accuracy === null) return 0;
+          if (a.accuracy === null) return 1;
+          if (b.accuracy === null) return -1;
+          return a.accuracy - b.accuracy;
+        });
+      } else if (sortMode === 'lastAnswered') {
+        sorted.sort((a, b) => {
+          if (!a.lastAnsweredAt && !b.lastAnsweredAt) return 0;
+          if (!a.lastAnsweredAt) return 1;
+          if (!b.lastAnsweredAt) return -1;
+          return new Date(a.lastAnsweredAt) - new Date(b.lastAnsweredAt);
+        });
+      }
+      sorted.forEach(t => el.appendChild(buildThemeLink(t)));
       return;
     }
 
