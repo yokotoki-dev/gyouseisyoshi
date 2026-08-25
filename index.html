@@ -547,15 +547,15 @@
       if (sortMode === 'accuracy') {
         sorted.sort((a, b) => {
           if (a.accuracy === null && b.accuracy === null) return 0;
-          if (a.accuracy === null) return 1;
-          if (b.accuracy === null) return -1;
+          if (a.accuracy === null) return -1;
+          if (b.accuracy === null) return 1;
           return a.accuracy - b.accuracy;
         });
       } else if (sortMode === 'lastAnswered') {
         sorted.sort((a, b) => {
           if (!a.lastAnsweredAt && !b.lastAnsweredAt) return 0;
-          if (!a.lastAnsweredAt) return 1;
-          if (!b.lastAnsweredAt) return -1;
+          if (!a.lastAnsweredAt) return -1;
+          if (!b.lastAnsweredAt) return 1;
           return new Date(a.lastAnsweredAt) - new Date(b.lastAnsweredAt);
         });
       }
@@ -574,22 +574,22 @@
     });
 
     if (sortMode === 'accuracy') {
-      // カテゴリの区切りは保ったまま、各カテゴリの中だけ正答率が低い順(未挑戦は末尾)に並べ替える
+      // カテゴリの区切りは保ったまま、各カテゴリの中だけ正答率が低い順(未挑戦は先頭)に並べ替える
       groups.forEach(g => {
         g.themes.sort((a, b) => {
           if (a.accuracy === null && b.accuracy === null) return 0;
-          if (a.accuracy === null) return 1;
-          if (b.accuracy === null) return -1;
+          if (a.accuracy === null) return -1;
+          if (b.accuracy === null) return 1;
           return a.accuracy - b.accuracy;
         });
       });
     } else if (sortMode === 'lastAnswered') {
-      // カテゴリの区切りは保ったまま、各カテゴリの中だけ最終回答日が古い順(未挑戦は末尾)に並べ替える
+      // カテゴリの区切りは保ったまま、各カテゴリの中だけ最終回答日が古い順(未挑戦は先頭)に並べ替える
       groups.forEach(g => {
         g.themes.sort((a, b) => {
           if (!a.lastAnsweredAt && !b.lastAnsweredAt) return 0;
-          if (!a.lastAnsweredAt) return 1;
-          if (!b.lastAnsweredAt) return -1;
+          if (!a.lastAnsweredAt) return -1;
+          if (!b.lastAnsweredAt) return 1;
           return new Date(a.lastAnsweredAt) - new Date(b.lastAnsweredAt);
         });
       });
@@ -788,19 +788,19 @@
       return true;
     });
     if (activeThemeSortMode === 'accuracy') {
-      // 一覧画面と同じ基準: 正答率が低い順(未挑戦は末尾)に並べ替える
+      // 一覧画面と同じ基準: 正答率が低い順(未挑戦は先頭)に並べ替える
       pool.sort((a, b) => {
         if (a.accuracy === null && b.accuracy === null) return 0;
-        if (a.accuracy === null) return 1;
-        if (b.accuracy === null) return -1;
+        if (a.accuracy === null) return -1;
+        if (b.accuracy === null) return 1;
         return a.accuracy - b.accuracy;
       });
     } else if (activeThemeSortMode === 'lastAnswered') {
-      // 一覧画面と同じ基準: 最終回答日が古い順(未挑戦は末尾)に並べ替える
+      // 一覧画面と同じ基準: 最終回答日が古い順(未挑戦は先頭)に並べ替える
       pool.sort((a, b) => {
         if (!a.lastAnsweredAt && !b.lastAnsweredAt) return 0;
-        if (!a.lastAnsweredAt) return 1;
-        if (!b.lastAnsweredAt) return -1;
+        if (!a.lastAnsweredAt) return -1;
+        if (!b.lastAnsweredAt) return 1;
         return new Date(a.lastAnsweredAt) - new Date(b.lastAnsweredAt);
       });
     }
