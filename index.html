@@ -175,6 +175,41 @@
   }
   @media (hover: hover) { .card.sorted:hover { border-color: var(--primary-light); } }
   .card.sorted.highlighted { background: var(--review-bg); border-color: var(--primary-light); color: var(--primary); }
+
+  /* ── 仕分け済みカードの解説を、吹き出しで表示する(Alpine.js) ── */
+  /* 外枠: 位置決めと、矢印の表示だけを担当する(overflowの制約を受けない) */
+  .explanation-bubble-wrap {
+    position: absolute;
+    left: 50%;
+    bottom: calc(100% + 12px);
+    transform: translateX(calc(-50% + var(--shift, 0px)));
+    z-index: 20;
+  }
+  .explanation-bubble-wrap::after {
+    content: '';
+    position: absolute;
+    top: 100%;
+    left: calc(50% + var(--arrow-offset, 0px));
+    transform: translateX(-50%);
+    border: 7px solid transparent;
+    border-top-color: var(--primary);
+  }
+  /* 本体: 実際の文章を表示し、長文のときはここだけスクロールする */
+  .explanation-bubble {
+    width: max-content;
+    max-width: 240px;
+    max-height: 200px;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    background: var(--primary);
+    color: #fff;
+    font-size: 12.5px;
+    line-height: 1.6;
+    text-align: left;
+    padding: 10px 12px;
+    border-radius: 10px;
+    box-shadow: 0 4px 14px rgba(28,46,74,.25);
+  }
   .deck { display: flex; flex-wrap: wrap; gap: 10px; }
   .card {
     background: var(--card-bg);
@@ -339,6 +374,7 @@
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdn.jsdelivr.net/npm/alpinejs@3/dist/cdn.min.js" defer></script>
 <script>
   // ── 1. Supabase接続設定 ──────────────────────────────
   // Supabaseダッシュボード > Project Settings > API から取得して置き換える
@@ -433,7 +469,6 @@
   let selectedCardEl = null;
   let selectedBucketId = null;
   let selectedBucketEl = null;
-  let highlightedChipEl = null; // 解説を見返しているチップ(仕分け済みカード)
   let sortedIds = new Set();
   let currentThemeId = null;
   let currentListFilter = 'all'; // 'all' | 'bookmark'
@@ -707,7 +742,7 @@
     sortedIds = new Set();
     clearCardSelection();
     clearBucketSelection();
-    highlightedChipEl = null;
+    if (window.Alpine) Alpine.store('bubble').close();
     document.querySelectorAll('.bucket-cards').forEach(el => { el.innerHTML = ''; });
     document.getElementById('feedback').hidden = true;
     renderDeck();
@@ -898,7 +933,7 @@
     selectedCardEl = null;
     selectedBucketId = null;
     selectedBucketEl = null;
-    highlightedChipEl = null;
+    if (window.Alpine) Alpine.store('bubble').close();
     renderBuckets(buckets || []);
     renderDeck();
   }
@@ -954,7 +989,7 @@
         if (selectedQuestionId) {
           const questionId = selectedQuestionId;
           clearCardSelection();
-          if (highlightedChipEl) { highlightedChipEl.classList.remove('highlighted'); highlightedChipEl = null; }
+          if (window.Alpine) Alpine.store('bubble').close();
           handleAnswer(questionId, bucket.id);
           return;
         }
@@ -966,7 +1001,7 @@
         }
 
         // バケツを先に選ぶ(バケツ→カードの順)
-        if (highlightedChipEl) { highlightedChipEl.classList.remove('highlighted'); highlightedChipEl = null; }
+        if (window.Alpine) Alpine.store('bubble').close();
         if (selectedBucketEl) selectedBucketEl.classList.remove('selected');
         selectedBucketId = bucket.id;
         selectedBucketEl = div;
@@ -996,7 +1031,7 @@
         chip.textContent = q.card_text;
         chip.addEventListener('click', e => {
           e.stopPropagation();
-          showCardExplanation(chip, q.explanation);
+          showCardExplanation(chip, q.id, q.explanation);
         });
         bucketCardsEl.appendChild(chip);
       });
@@ -1029,7 +1064,7 @@
     // すでにバケツを選択中なら、カードを選んだ瞬間に判定する(バケツ→カードの順)
     // バケツの選択は解除せず、続けて他のカードもそのバケツに入れられるようにする
     if (selectedBucketId) {
-      if (highlightedChipEl) { highlightedChipEl.classList.remove('highlighted'); highlightedChipEl = null; }
+      if (window.Alpine) Alpine.store('bubble').close();
       handleAnswer(questionId, selectedBucketId);
       return;
     }
@@ -1040,7 +1075,7 @@
       return;
     }
 
-    if (highlightedChipEl) { highlightedChipEl.classList.remove('highlighted'); highlightedChipEl = null; }
+    if (window.Alpine) Alpine.store('bubble').close();
     if (selectedCardEl) selectedCardEl.classList.remove('selected');
     selectedQuestionId = questionId;
     selectedCardEl = cardEl;
@@ -1061,13 +1096,57 @@
 
   // 仕分け済みチップをタップしたときの共通処理。
   // 仕分け操作中の選択(カード・バケツ)は解除し、代わりにそのチップ自体を強調表示する。
-  function showCardExplanation(chipEl, explanation) {
+  // 仕分け済みチップをタップしたときの共通処理。
+  // 「今、どのquestion_idの吹き出しが開いているか」は、Alpine.store('bubble')が一元管理する。
+  // ここでは、そのstoreの状態に応じて、実際の吹き出しDOM(外枠+本体)を、生成・削除する。
+  function showCardExplanation(chipEl, questionId, explanation) {
     clearCardSelection();
     clearBucketSelection();
-    if (highlightedChipEl) highlightedChipEl.classList.remove('highlighted');
-    highlightedChipEl = chipEl;
+
+    const store = window.Alpine ? Alpine.store('bubble') : null;
+    const wasOpen = store && store.openId === questionId;
+
+    // 既存の吹き出し・強調表示は、いったんすべて消す
+    document.querySelectorAll('.explanation-bubble-wrap').forEach(el => el.remove());
+    document.querySelectorAll('.card.sorted.highlighted').forEach(el => el.classList.remove('highlighted'));
+
+    if (store) store.toggle(questionId);
+
+    // 直前まで、このカード自身が開いていた場合は、そのまま閉じて終わる(トグル)
+    if (wasOpen) return;
+
     chipEl.classList.add('highlighted');
-    showFeedback(null, explanation);
+
+    const wrap = document.createElement('div');
+    wrap.className = 'explanation-bubble-wrap';
+    const bubble = document.createElement('div');
+    bubble.className = 'explanation-bubble';
+    bubble.textContent = explanation;
+    wrap.appendChild(bubble);
+    chipEl.appendChild(wrap);
+
+    requestAnimationFrame(() => adjustBubblePosition(wrap, bubble));
+  }
+
+  // 吹き出しが、画面の左右・上端からはみ出さないよう、表示後に位置・高さを調整する
+  function adjustBubblePosition(wrap, bubble) {
+    const margin = 8;
+    const rect = wrap.getBoundingClientRect();
+    let shift = 0;
+    if (rect.left < margin) {
+      shift = margin - rect.left;
+    } else if (rect.right > window.innerWidth - margin) {
+      shift = (window.innerWidth - margin) - rect.right;
+    }
+    if (shift !== 0) {
+      wrap.style.setProperty('--shift', shift + 'px');
+      wrap.style.setProperty('--arrow-offset', (-shift) + 'px');
+    }
+    const updatedRect = wrap.getBoundingClientRect();
+    if (updatedRect.top < margin) {
+      const available = updatedRect.bottom - margin;
+      bubble.style.maxHeight = available + 'px';
+    }
   }
 
   // ── 5. 正誤判定・フィードバック・ログ保存 ────────────────
@@ -1088,7 +1167,7 @@
         // 仕分け済みのカードも、タップすればいつでも解説を見返せるようにする
         chip.addEventListener('click', e => {
           e.stopPropagation();
-          showCardExplanation(chip, question.explanation);
+          showCardExplanation(chip, questionId, question.explanation);
         });
         bucketCardsEl.appendChild(chip);
       }
@@ -1117,6 +1196,9 @@
   }
 
   // isCorrectがnullのときは「復習モード」(正誤ラベルを出さず、解説だけ見せる)
+  // 正誤判定の直後(handleAnswer)にのみ使用する。
+  // 仕分け済みカードの解説の見返しは、吹き出し(showCardExplanation)に置き換えたため、
+  // isCorrect === null での呼び出しは、現在は発生しない。
   function showFeedback(isCorrect, explanation) {
     const el = document.getElementById('feedback');
     el.hidden = false;
@@ -1178,7 +1260,22 @@
     if (e.target.closest('.card') || e.target.closest('.bucket')) return;
     clearCardSelection();
     clearBucketSelection();
-    if (highlightedChipEl) { highlightedChipEl.classList.remove('highlighted'); highlightedChipEl = null; }
+    if (window.Alpine) Alpine.store('bubble').close();
+  });
+
+  // ── 吹き出し(仕分け済みカードの解説)の開閉状態(Alpine.js) ──
+  // 「今、どのquestion_idの吹き出しが開いているか」という、1つの状態だけを、
+  // アプリ全体で共有する。DOM要素への参照を、あちこちで手作業に持ち回らずに済む。
+  document.addEventListener('alpine:init', () => {
+    Alpine.store('bubble', {
+      openId: null,
+      toggle(questionId) {
+        this.openId = (this.openId === questionId) ? null : questionId;
+      },
+      close() {
+        this.openId = null;
+      },
+    });
   });
 
   devSignIn().then(initListView);</script>
