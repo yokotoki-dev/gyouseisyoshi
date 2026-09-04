@@ -179,7 +179,7 @@
   @media (hover: hover) { .card.sorted:hover { border-color: var(--primary-light); } }
   .card.sorted.highlighted { background: var(--review-bg); border-color: var(--primary-light); color: var(--primary); }
 
-  /* ── 仕分け済みカードの解説を、吹き出しで表示する(Alpine.js) ── */
+  /* ── 仕分け済みカードの解説を、吹き出しで表示する ── */
   /* 外枠: 位置決めと、矢印の表示だけを担当する(overflowの制約を受けない) */
   .explanation-bubble-wrap {
     position: absolute;
@@ -401,7 +401,6 @@
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-<script src="https://cdn.jsdelivr.net/npm/alpinejs@3/dist/cdn.min.js" defer></script>
 <script>
   // ── 1. Supabase接続設定 ──────────────────────────────
   // Supabaseダッシュボード > Project Settings > API から取得して置き換える
@@ -496,6 +495,7 @@
   let selectedCardEl = null;
   let selectedBucketId = null;
   let selectedBucketEl = null;
+  let openBubbleQuestionId = null; // 今、吹き出しを開いている、カードのquestion_id(Vanilla JSで、直接管理する)
   let sortedIds = new Set();
   let currentThemeId = null;
   let currentListFilter = 'all'; // 'all' | 'bookmark'
@@ -1122,8 +1122,9 @@
   }
 
   // 仕分け済みチップをタップしたときの共通処理。
-  // 「今、どのquestion_idの吹き出しが開いているか」は、Alpine.store('bubble')が一元管理する。
-  // ここでは、そのstoreの状態に応じて、実際の吹き出しDOM(外枠+本体)を、生成・削除する。
+  // 「今、どのquestion_idの吹き出しが開いているか」は、openBubbleQuestionIdという、
+  // 1つの変数だけで、一元管理する(以前、Alpine.storeを使っていたが、頻繁なDOM操作との
+  // 相性が悪く、ページのリロードを引き起こすことが分かったため、Vanilla JSに戻した)。
   // keepBucketSelected: trueの場合、バケツの選択(連続投入のための状態)は解除しない。
   // 「②バケツ→カード」の流れで、正解した、まさにその瞬間に使う。
   function showCardExplanation(chipEl, questionId, explanation, keepBucketSelected) {
@@ -1131,14 +1132,13 @@
     if (!keepBucketSelected) clearBucketSelection();
     document.getElementById('feedback').hidden = true; // 以前の正解時に出た、画面下の解説を隠す
 
-    const store = window.Alpine ? Alpine.store('bubble') : null;
-    const wasOpen = store && store.openId === questionId;
+    const wasOpen = openBubbleQuestionId === questionId;
 
     // 既存の吹き出し・強調表示は、いったんすべて消す
     document.querySelectorAll('.explanation-bubble-wrap').forEach(el => el.remove());
     document.querySelectorAll('.card.sorted.highlighted').forEach(el => el.classList.remove('highlighted'));
 
-    if (store) store.toggle(questionId);
+    openBubbleQuestionId = wasOpen ? null : questionId;
 
     // 直前まで、このカード自身が開いていた場合は、そのまま閉じて終わる(トグル)
     if (wasOpen) return;
@@ -1344,11 +1344,11 @@
   updateListModeToggleButton();
   loadAnnouncement();
 
-  // 吹き出し・強調表示を、DOM要素ごと、確実に消す(store側の状態も、あわせてリセットする)
+  // 吹き出し・強調表示を、DOM要素ごと、確実に消す
   function closeExplanationBubble() {
     document.querySelectorAll('.explanation-bubble-wrap').forEach(el => el.remove());
     document.querySelectorAll('.card.sorted.highlighted').forEach(el => el.classList.remove('highlighted'));
-    if (window.Alpine) Alpine.store('bubble').close();
+    openBubbleQuestionId = null;
   }
 
   // カード・バケツ以外の何もない場所をタップしたら、選択中の状態をまとめて解除する
@@ -1357,21 +1357,6 @@
     clearCardSelection();
     clearBucketSelection();
     closeExplanationBubble();
-  });
-
-  // ── 吹き出し(仕分け済みカードの解説)の開閉状態(Alpine.js) ──
-  // 「今、どのquestion_idの吹き出しが開いているか」という、1つの状態だけを、
-  // アプリ全体で共有する。DOM要素への参照を、あちこちで手作業に持ち回らずに済む。
-  document.addEventListener('alpine:init', () => {
-    Alpine.store('bubble', {
-      openId: null,
-      toggle(questionId) {
-        this.openId = (this.openId === questionId) ? null : questionId;
-      },
-      close() {
-        this.openId = null;
-      },
-    });
   });
 
   devSignIn().then(initListView);</script>
