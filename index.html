@@ -224,6 +224,7 @@
   .explanation-bubble.incorrect { background: var(--incorrect); box-shadow: 0 4px 14px rgba(179,68,30,.25); }
   .deck { display: flex; flex-wrap: wrap; gap: 10px; }
   .card {
+    position: relative;
     background: var(--card-bg);
     border: 1px solid var(--border);
     border-radius: 8px;
@@ -1107,8 +1108,6 @@
   }
 
   // 仕分け済みチップをタップしたときの共通処理。
-  // 仕分け操作中の選択(カード・バケツ)は解除し、代わりにそのチップ自体を強調表示する。
-  // 仕分け済みチップをタップしたときの共通処理。
   // 「今、どのquestion_idの吹き出しが開いているか」は、Alpine.store('bubble')が一元管理する。
   // ここでは、そのstoreの状態に応じて、実際の吹き出しDOM(外枠+本体)を、生成・削除する。
   // keepBucketSelected: trueの場合、バケツの選択(連続投入のための状態)は解除しない。
@@ -1146,10 +1145,10 @@
     });
   }
 
-  // 不正解のとき、選んだバケツの近くに、吹き出しで解説を表示する(赤系の配色)
-  function showBucketExplanation(bucketEl, explanation) {
+  // 不正解のとき、選んだ、そのカード自身の近くに、吹き出しで解説を表示する(赤系の配色)
+  function showIncorrectExplanation(targetEl, explanation) {
+    closeExplanationBubble();
     document.getElementById('feedback').hidden = true;
-    document.querySelectorAll('.explanation-bubble-wrap').forEach(el => el.remove());
 
     const wrap = document.createElement('div');
     wrap.className = 'explanation-bubble-wrap incorrect';
@@ -1157,7 +1156,7 @@
     bubble.className = 'explanation-bubble incorrect';
     bubble.textContent = explanation;
     wrap.appendChild(bubble);
-    bucketEl.appendChild(wrap);
+    targetEl.appendChild(wrap);
 
     requestAnimationFrame(() => {
       wrap.classList.add('show');
@@ -1211,13 +1210,8 @@
         showCardExplanation(chip, questionId, question.explanation, selectedBucketId === bucketId);
       }
     } else {
-      // 不正解の場合、カードはバケツに残らないため、選んだバケツの近くに、吹き出しで表示する
-      const bucketEl = document.querySelector(`.bucket[data-bucket-id="${bucketId}"]`);
-      if (bucketEl) {
-        showBucketExplanation(bucketEl, question.explanation);
-      } else {
-        showFeedback(isCorrect, question.explanation);
-      }
+      // 不正解の場合、カードはデッキに残ったままだが、renderDeck()で作り直されるため、
+      // 吹き出しの表示自体は、renderDeck()の後に、あらためて行う
     }
 
     // 通信を待たず、画面の更新はここで即座に行う
@@ -1225,6 +1219,15 @@
     selectedQuestionId = null;
     selectedCardEl = null;
     renderDeck();
+
+    if (!isCorrect) {
+      const cardEl = document.querySelector(`.card[data-question-id="${questionId}"]`);
+      if (cardEl) {
+        showIncorrectExplanation(cardEl, question.explanation);
+      } else {
+        showFeedback(isCorrect, question.explanation);
+      }
+    }
 
     // ログイン済みユーザーのみ解答ログを保存(画面表示とは切り離し、裏側で行う)
     const { data: { user } } = await supabaseClient.auth.getUser();
