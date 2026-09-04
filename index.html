@@ -1217,13 +1217,19 @@
 
     // 通信を待たず、画面の更新はここで即座に行う
     // (バケツの選択は解除しない。続けて同じバケツに他のカードを入れられるようにするため)
-    selectedQuestionId = null;
-    selectedCardEl = null;
+    if (isCorrect) {
+      selectedQuestionId = null;
+      selectedCardEl = null;
+    }
     renderDeck();
 
     if (!isCorrect) {
       const cardEl = document.querySelector(`.card[data-question-id="${questionId}"]`);
       if (cardEl) {
+        // 不正解の場合、まだ正しい判断ができていないため、カードの選択(青い枠)を、そのまま維持する
+        selectedQuestionId = questionId;
+        selectedCardEl = cardEl;
+        cardEl.classList.add('selected');
         showIncorrectExplanation(cardEl, question.explanation);
       } else {
         showFeedback(isCorrect, question.explanation);
