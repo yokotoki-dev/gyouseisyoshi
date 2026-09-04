@@ -480,9 +480,18 @@
     }
   }
 
-  // ログイン・ログアウトのたびに、表示中のテーマと一覧の進捗を読み込み直す
+  // ログイン・ログアウトのたびに、表示中のテーマと一覧の進捗を読み込み直す。
+  // ただし、Supabaseの仕様上、タブを非アクティブ→アクティブに戻しただけでも、
+  // 同じユーザーのまま、このコールバックが再度呼ばれることがある(トークンの、
+  // 自動確認のため)。その場合まで、テーマを読み込み直すと、タブを切り替えるたびに
+  // リロードされたように見えてしまうため、ユーザーIDが実際に変わったときだけ反応する。
+  let lastKnownUserId = undefined; // undefined = まだ一度も、確認していない
   supabaseClient.auth.onAuthStateChange((_event, session) => {
+    const userId = session?.user?.id || null;
     renderAuthArea(session?.user || null);
+    if (userId === lastKnownUserId) return; // 前回と同じユーザーのままなら、何もしない
+    lastKnownUserId = userId;
+
     if (currentThemeId) loadTheme(currentThemeId);
     loadUserProgress().then(() => {
       if (document.getElementById('list-view').hidden === false) applyListFilter();
