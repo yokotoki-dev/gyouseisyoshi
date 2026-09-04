@@ -751,7 +751,7 @@
     sortedIds = new Set();
     clearCardSelection();
     clearBucketSelection();
-    if (window.Alpine) Alpine.store('bubble').close();
+    closeExplanationBubble();
     document.querySelectorAll('.bucket-cards').forEach(el => { el.innerHTML = ''; });
     document.getElementById('feedback').hidden = true;
     renderDeck();
@@ -942,7 +942,7 @@
     selectedCardEl = null;
     selectedBucketId = null;
     selectedBucketEl = null;
-    if (window.Alpine) Alpine.store('bubble').close();
+    closeExplanationBubble();
     renderBuckets(buckets || []);
     renderDeck();
   }
@@ -998,7 +998,7 @@
         if (selectedQuestionId) {
           const questionId = selectedQuestionId;
           clearCardSelection();
-          if (window.Alpine) Alpine.store('bubble').close();
+          closeExplanationBubble();
           handleAnswer(questionId, bucket.id);
           return;
         }
@@ -1010,7 +1010,7 @@
         }
 
         // バケツを先に選ぶ(バケツ→カードの順)
-        if (window.Alpine) Alpine.store('bubble').close();
+        closeExplanationBubble();
         if (selectedBucketEl) selectedBucketEl.classList.remove('selected');
         selectedBucketId = bucket.id;
         selectedBucketEl = div;
@@ -1073,7 +1073,7 @@
     // すでにバケツを選択中なら、カードを選んだ瞬間に判定する(バケツ→カードの順)
     // バケツの選択は解除せず、続けて他のカードもそのバケツに入れられるようにする
     if (selectedBucketId) {
-      if (window.Alpine) Alpine.store('bubble').close();
+      closeExplanationBubble();
       handleAnswer(questionId, selectedBucketId);
       return;
     }
@@ -1084,7 +1084,7 @@
       return;
     }
 
-    if (window.Alpine) Alpine.store('bubble').close();
+    closeExplanationBubble();
     if (selectedCardEl) selectedCardEl.classList.remove('selected');
     selectedQuestionId = questionId;
     selectedCardEl = cardEl;
@@ -1168,7 +1168,6 @@
     if (!question) return;
 
     const isCorrect = question.answer_bucket_id === bucketId;
-    showFeedback(isCorrect, question.explanation);
 
     if (isCorrect) {
       sortedIds.add(questionId);
@@ -1183,7 +1182,13 @@
           showCardExplanation(chip, questionId, question.explanation);
         });
         bucketCardsEl.appendChild(chip);
+        // 正解した、まさにその瞬間も、吹き出しで解説を表示する(画面下の解説エリアは使わない)
+        showCardExplanation(chip, questionId, question.explanation);
       }
+    } else {
+      // 不正解の場合は、カードがバケツに残らない(チップにならない)ため、
+      // これまで通り、画面下の解説エリアに表示する
+      showFeedback(isCorrect, question.explanation);
     }
 
     // 通信を待たず、画面の更新はここで即座に行う
@@ -1268,12 +1273,19 @@
   updateListModeToggleButton();
   loadAnnouncement();
 
+  // 吹き出し・強調表示を、DOM要素ごと、確実に消す(store側の状態も、あわせてリセットする)
+  function closeExplanationBubble() {
+    document.querySelectorAll('.explanation-bubble-wrap').forEach(el => el.remove());
+    document.querySelectorAll('.card.sorted.highlighted').forEach(el => el.classList.remove('highlighted'));
+    if (window.Alpine) Alpine.store('bubble').close();
+  }
+
   // カード・バケツ以外の何もない場所をタップしたら、選択中の状態をまとめて解除する
   document.addEventListener('click', e => {
     if (e.target.closest('.card') || e.target.closest('.bucket')) return;
     clearCardSelection();
     clearBucketSelection();
-    if (window.Alpine) Alpine.store('bubble').close();
+    closeExplanationBubble();
   });
 
   // ── 吹き出し(仕分け済みカードの解説)の開閉状態(Alpine.js) ──
