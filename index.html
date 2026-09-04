@@ -145,6 +145,7 @@
   }
   .buckets { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; margin-bottom: 24px; }
   .bucket {
+    position: relative;
     min-height: 90px;
     background: var(--card-bg);
     border: 2px dashed var(--border);
@@ -203,6 +204,7 @@
     border: 7px solid transparent;
     border-top-color: var(--primary);
   }
+  .explanation-bubble-wrap.incorrect::after { border-top-color: var(--incorrect); }
   /* 本体: 実際の文章を表示し、長文のときはここだけスクロールする */
   .explanation-bubble {
     width: max-content;
@@ -219,6 +221,7 @@
     border-radius: 10px;
     box-shadow: 0 4px 14px rgba(28,46,74,.25);
   }
+  .explanation-bubble.incorrect { background: var(--incorrect); box-shadow: 0 4px 14px rgba(179,68,30,.25); }
   .deck { display: flex; flex-wrap: wrap; gap: 10px; }
   .card {
     background: var(--card-bg);
@@ -1108,9 +1111,11 @@
   // 仕分け済みチップをタップしたときの共通処理。
   // 「今、どのquestion_idの吹き出しが開いているか」は、Alpine.store('bubble')が一元管理する。
   // ここでは、そのstoreの状態に応じて、実際の吹き出しDOM(外枠+本体)を、生成・削除する。
-  function showCardExplanation(chipEl, questionId, explanation) {
+  // keepBucketSelected: trueの場合、バケツの選択(連続投入のための状態)は解除しない。
+  // 「②バケツ→カード」の流れで、正解した、まさにその瞬間に使う。
+  function showCardExplanation(chipEl, questionId, explanation, keepBucketSelected) {
     clearCardSelection();
-    clearBucketSelection();
+    if (!keepBucketSelected) clearBucketSelection();
     document.getElementById('feedback').hidden = true; // 以前の正解時に出た、画面下の解説を隠す
 
     const store = window.Alpine ? Alpine.store('bubble') : null;
@@ -1134,6 +1139,25 @@
     bubble.textContent = explanation;
     wrap.appendChild(bubble);
     chipEl.appendChild(wrap);
+
+    requestAnimationFrame(() => {
+      wrap.classList.add('show');
+      adjustBubblePosition(wrap, bubble);
+    });
+  }
+
+  // 不正解のとき、選んだバケツの近くに、吹き出しで解説を表示する(赤系の配色)
+  function showBucketExplanation(bucketEl, explanation) {
+    document.getElementById('feedback').hidden = true;
+    document.querySelectorAll('.explanation-bubble-wrap').forEach(el => el.remove());
+
+    const wrap = document.createElement('div');
+    wrap.className = 'explanation-bubble-wrap incorrect';
+    const bubble = document.createElement('div');
+    bubble.className = 'explanation-bubble incorrect';
+    bubble.textContent = explanation;
+    wrap.appendChild(bubble);
+    bucketEl.appendChild(wrap);
 
     requestAnimationFrame(() => {
       wrap.classList.add('show');
@@ -1182,13 +1206,18 @@
           showCardExplanation(chip, questionId, question.explanation);
         });
         bucketCardsEl.appendChild(chip);
-        // 正解した、まさにその瞬間も、吹き出しで解説を表示する(画面下の解説エリアは使わない)
-        showCardExplanation(chip, questionId, question.explanation);
+        // 正解した、まさにその瞬間も、吹き出しで解説を表示する(画面下の解説エリアは使わない)。
+        // 「②バケツ→カード」で、連続してカードを入れている最中は、バケツの選択を維持したままにする
+        showCardExplanation(chip, questionId, question.explanation, selectedBucketId === bucketId);
       }
     } else {
-      // 不正解の場合は、カードがバケツに残らない(チップにならない)ため、
-      // これまで通り、画面下の解説エリアに表示する
-      showFeedback(isCorrect, question.explanation);
+      // 不正解の場合、カードはバケツに残らないため、選んだバケツの近くに、吹き出しで表示する
+      const bucketEl = document.querySelector(`.bucket[data-bucket-id="${bucketId}"]`);
+      if (bucketEl) {
+        showBucketExplanation(bucketEl, question.explanation);
+      } else {
+        showFeedback(isCorrect, question.explanation);
+      }
     }
 
     // 通信を待たず、画面の更新はここで即座に行う
