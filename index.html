@@ -152,6 +152,7 @@
     padding: 12px 12px 40px;
     text-align: center;
     cursor: pointer;
+    overflow: visible;
     transition: border-color .15s, background .15s;
   }
   .bucket h3 { margin: 0 0 8px; font-size: 15px; color: var(--primary); }
@@ -184,6 +185,13 @@
     bottom: calc(100% + 12px);
     transform: translateX(calc(-50% + var(--shift, 0px)));
     z-index: 20;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity .12s ease;
+  }
+  .explanation-bubble-wrap.show {
+    opacity: 1;
+    pointer-events: auto;
   }
   .explanation-bubble-wrap::after {
     content: '';
@@ -1102,6 +1110,7 @@
   function showCardExplanation(chipEl, questionId, explanation) {
     clearCardSelection();
     clearBucketSelection();
+    document.getElementById('feedback').hidden = true; // 以前の正解時に出た、画面下の解説を隠す
 
     const store = window.Alpine ? Alpine.store('bubble') : null;
     const wasOpen = store && store.openId === questionId;
@@ -1125,7 +1134,10 @@
     wrap.appendChild(bubble);
     chipEl.appendChild(wrap);
 
-    requestAnimationFrame(() => adjustBubblePosition(wrap, bubble));
+    requestAnimationFrame(() => {
+      wrap.classList.add('show');
+      adjustBubblePosition(wrap, bubble);
+    });
   }
 
   // 吹き出しが、画面の左右・上端からはみ出さないよう、表示後に位置・高さを調整する
