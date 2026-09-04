@@ -191,6 +191,11 @@
     pointer-events: none;
     transition: opacity .12s ease;
   }
+  /* 上に、十分なスペースがないとき、下向きに表示する */
+  .explanation-bubble-wrap.below {
+    bottom: auto;
+    top: calc(100% + 12px);
+  }
   .explanation-bubble-wrap.show {
     opacity: 1;
     pointer-events: auto;
@@ -204,6 +209,14 @@
     border: 7px solid transparent;
     border-top-color: var(--primary);
   }
+  /* 下向き表示のときは、矢印も、上を指すように切り替える */
+  .explanation-bubble-wrap.below::after {
+    top: auto;
+    bottom: 100%;
+    border-top-color: transparent;
+    border-bottom-color: var(--primary);
+  }
+  .explanation-bubble-wrap.below.incorrect::after { border-bottom-color: var(--incorrect); }
   .explanation-bubble-wrap.incorrect::after { border-top-color: var(--incorrect); }
   /* 本体: 実際の文章を表示し、長文のときはここだけスクロールする */
   .explanation-bubble {
@@ -1168,6 +1181,17 @@
   // 吹き出しが、画面の左右・上端からはみ出さないよう、表示後に位置・高さを調整する
   function adjustBubblePosition(wrap, bubble) {
     const margin = 8;
+    const minHeightNeeded = 80; // 最低限、これだけの高さが確保できないなら、下向きに切り替える
+
+    // 上に表示した場合の、実際に確保できる高さを、先に見積もる
+    const rectAbove = wrap.getBoundingClientRect();
+    const availableAbove = rectAbove.bottom - margin;
+
+    if (rectAbove.top < margin && availableAbove < minHeightNeeded) {
+      // 上のスペースが、足りないので、下向きに切り替える
+      wrap.classList.add('below');
+    }
+
     const rect = wrap.getBoundingClientRect();
     let shift = 0;
     if (rect.left < margin) {
@@ -1179,8 +1203,16 @@
       wrap.style.setProperty('--shift', shift + 'px');
       wrap.style.setProperty('--arrow-offset', (-shift) + 'px');
     }
+
     const updatedRect = wrap.getBoundingClientRect();
-    if (updatedRect.top < margin) {
+    if (wrap.classList.contains('below')) {
+      // 下向きのときは、画面の下端から、はみ出していないかを確認する
+      if (updatedRect.bottom > window.innerHeight - margin) {
+        const available = (window.innerHeight - margin) - updatedRect.top;
+        bubble.style.maxHeight = available + 'px';
+      }
+    } else if (updatedRect.top < margin) {
+      // 上向きのままの場合、それでも上端からはみ出すなら、高さを縮める
       const available = updatedRect.bottom - margin;
       bubble.style.maxHeight = available + 'px';
     }
