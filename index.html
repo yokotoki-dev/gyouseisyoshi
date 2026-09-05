@@ -50,7 +50,6 @@
     margin-bottom: 16px;
     white-space: pre-line;
   }
-  .deck-hint { color: var(--muted); font-size: 13px; margin: 0 0 10px; white-space: pre-line; line-height: 1.6; }
   .filter-selectors { display: flex; gap: 10px; margin-bottom: 20px; }
   .filter-selectors select { flex: 1; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--border); background: var(--card-bg); font-size: 14px; }
   .category-group { margin-bottom: 20px; }
@@ -120,6 +119,7 @@
     cursor: pointer;
     padding: 6px 12px;
   }
+  .mode-toggle-btn.active { background: var(--review-bg); border-color: var(--primary-light); color: var(--primary); }
   .mode-switch { display: flex; align-items: center; gap: 8px; }
   .mode-badge {
     font-size: 12px;
@@ -359,6 +359,10 @@
         <button class="mode-toggle-btn" id="list-mode-toggle-btn">モード切替</button>
       </div>
     </div>
+    <div class="list-secondary-row">
+      <span></span>
+      <button class="mode-toggle-btn" id="list-shuffle-toggle-btn">🔀 バケツシャッフルOFF</button>
+    </div>
     <div id="theme-list"></div>
   </div>
 
@@ -374,12 +378,13 @@
         <button class="mode-toggle-btn" id="mode-toggle-btn">モード切替</button>
       </div>
     </div>
+    <div class="mode-toggle-row">
+      <span></span>
+      <button class="mode-toggle-btn" id="shuffle-toggle-btn">🔀 バケツをシャッフル</button>
+    </div>
     <p id="theme-breadcrumb" class="theme-breadcrumb"></p>
     <div id="theme-instruction">読み込み中...</div>
     <div id="buckets" class="buckets"></div>
-    <p class="deck-hint" id="deck-hint">下のカードを、上のバケツに仕分けましょう。
-カードを選び、どのバケツに入れるかを選んで仕分けるか、
-バケツを選び、中に入るカードを選んで仕分けることができます。</p>
     <div id="deck" class="deck"></div>
     <div id="lock-screen" class="lock-screen" hidden>
       <div class="lock-icon">🔒</div>
@@ -507,11 +512,15 @@
   let openBubbleQuestionId = null; // 今、吹き出しを開いている、カードのquestion_id(Vanilla JSで、直接管理する)
   let sortedIds = new Set();
   let currentThemeId = null;
+  let currentThemeShuffleAllowed = false; // 今のテーマが、DB側でシャッフルを許可されているか(themes.shuffle_buckets)
   let currentListFilter = 'all'; // 'all' | 'bookmark'
   let sortMode = 'none'; // 'none' | 'accuracy'(正答率が低い順) | 'lastAnswered'(最終回答日が古い順)
   let themeSequence = []; // 全カテゴリを横断した「カテゴリ順→テーマ順」の一覧(ブックマーク・履歴を含む)
   let categoryList = []; // カテゴリのプルダウン用一覧
   let isViewMode = false; // 閲覧モード(最初から全カード仕分け済みの状態で表示。記録は保存しない)
+  // バケツの位置をシャッフルするか。ユーザーが選んだ、設定は、
+  // アプリ全体で共通の、1つの設定として、ブラウザに覚えさせておく
+  let isShuffleEnabled = localStorage.getItem('yokotoki_shuffle_buckets') === 'true';
   let activeThemeCategoryId = ''; // 問題画面での「次へ・ランダム」の対象範囲(カテゴリ)。空なら全カテゴリ横断
   let activeThemeBookmarkOnly = false; // 問題画面での「次へ・ランダム」の対象範囲(ブックマークのみか)
   let activeThemeSortMode = 'none'; // 問題画面での「次へ」の並び順('none' | 'accuracy' | 'lastAnswered')
@@ -822,6 +831,7 @@
     document.getElementById('list-view').hidden = true;
     document.getElementById('practice-view').hidden = false;
     updateModeToggleButton();
+    updateShuffleToggleButton();
     // 一覧画面で絞り込んでいたカテゴリ・ブックマーク・並び順を、次へ・ランダムの対象範囲として引き継ぐ
     activeThemeCategoryId = document.getElementById('filter-category-select').value;
     activeThemeBookmarkOnly = currentListFilter === 'bookmark';
@@ -833,7 +843,17 @@
     const badge = document.getElementById('mode-badge');
     badge.textContent = isViewMode ? '👁 閲覧中' : '✏️ 仕分け中';
     badge.classList.toggle('view', isViewMode);
-    document.getElementById('deck-hint').hidden = isViewMode;
+  }
+
+  // シャッフルの、オン・オフに応じて、ボタンの見た目を更新する
+  function updateShuffleToggleButton() {
+    const label = isShuffleEnabled ? '🔀 バケツシャッフルON' : '🔀 バケツシャッフルOFF';
+    const btn = document.getElementById('shuffle-toggle-btn');
+    btn.textContent = label;
+    btn.classList.toggle('active', isShuffleEnabled);
+    const listBtn = document.getElementById('list-shuffle-toggle-btn');
+    listBtn.textContent = label;
+    listBtn.classList.toggle('active', isShuffleEnabled);
   }
 
   // 一覧画面側のバッジは「次にテーマを開くときの初期モード」を表す
@@ -951,6 +971,10 @@
     document.getElementById('theme-breadcrumb').textContent = `${theme.categories?.name || ''} › ${theme.title}`;
     updateBookmarkButton();
 
+    // シャッフルの、オン・オフは、テーマごとではなく、アプリ全体で共通の設定として扱う
+    // (isShuffleEnabledは、localStorageから復元済みの値を、そのまま使う)
+    updateShuffleToggleButton();
+
     if (locked) {
       showLockScreen();
       return;
@@ -970,7 +994,12 @@
     selectedBucketId = null;
     selectedBucketEl = null;
     closeExplanationBubble();
-    renderBuckets(buckets || []);
+    // 実際にシャッフルするかは、「ユーザーが、シャッフルを選んでいるか」と、
+    // 「そのテーマ自体が、シャッフルに対応しているか(theme.shuffle_buckets)」の、
+    // 両方が、trueのときだけ。これにより、条文並べ替えのようなテーマでは、
+    // ユーザーが、どう選んでも、位置が固定されたまま、安全に保たれる。
+    currentThemeShuffleAllowed = !!theme.shuffle_buckets;
+    renderBuckets(buckets || [], isShuffleEnabled && currentThemeShuffleAllowed);
     renderDeck();
   }
 
@@ -996,10 +1025,11 @@
   }
 
   // ── 3. バケツの描画(タップ/ドロップの両方を受け付ける) ───
-  function renderBuckets(buckets) {
+  function renderBuckets(buckets, shuffleBuckets) {
     const el = document.getElementById('buckets');
     el.innerHTML = '';
-    buckets.forEach(bucket => {
+    const orderedBuckets = shuffleBuckets ? shuffleArray(buckets.slice()) : buckets;
+    orderedBuckets.forEach(bucket => {
       const div = document.createElement('div');
       div.className = 'bucket';
       div.dataset.bucketId = bucket.id;
@@ -1060,6 +1090,21 @@
     // 閲覧モード: 描画直後に、全問題を正解のバケツへ最初から差し込んでおく
     if (isViewMode) {
       currentQuestions.forEach(q => {
+        const bucketCardsEl = document.querySelector(`.bucket[data-bucket-id="${q.answer_bucket_id}"] .bucket-cards`);
+        if (!bucketCardsEl) return;
+        const chip = document.createElement('div');
+        chip.className = 'card sorted';
+        chip.textContent = q.card_text;
+        chip.addEventListener('click', e => {
+          e.stopPropagation();
+          showCardExplanation(chip, q.id, q.explanation);
+        });
+        bucketCardsEl.appendChild(chip);
+      });
+    } else {
+      // 仕分けモード: バケツの位置を、シャッフルし直した際などに、
+      // すでに正解済みのカードが、消えないよう、あらためて差し込み直す
+      currentQuestions.filter(q => sortedIds.has(q.id)).forEach(q => {
         const bucketCardsEl = document.querySelector(`.bucket[data-bucket-id="${q.answer_bucket_id}"] .bucket-cards`);
         if (!bucketCardsEl) return;
         const chip = document.createElement('div');
@@ -1322,9 +1367,25 @@
     updateListModeToggleButton();
     if (currentThemeId) loadTheme(currentThemeId);
   });
+  document.getElementById('shuffle-toggle-btn').addEventListener('click', () => {
+    isShuffleEnabled = !isShuffleEnabled;
+    localStorage.setItem('yokotoki_shuffle_buckets', String(isShuffleEnabled));
+    updateShuffleToggleButton();
+    clearBucketSelection(); // バケツを作り直すため、古い選択状態(DOM参照)は、念のためクリアする
+    closeExplanationBubble(); // バケツの位置が変わるため、吹き出しも一緒に閉じる
+    if (currentThemeId) {
+      supabaseClient.from('buckets').select('*').eq('theme_id', currentThemeId).order('sort_order')
+        .then(({ data: buckets }) => renderBuckets(buckets || [], isShuffleEnabled && currentThemeShuffleAllowed));
+    }
+  });
   document.getElementById('list-mode-toggle-btn').addEventListener('click', () => {
     isViewMode = !isViewMode;
     updateListModeToggleButton();
+  });
+  document.getElementById('list-shuffle-toggle-btn').addEventListener('click', () => {
+    isShuffleEnabled = !isShuffleEnabled;
+    localStorage.setItem('yokotoki_shuffle_buckets', String(isShuffleEnabled));
+    updateShuffleToggleButton();
   });
   document.getElementById('next-theme-btn').addEventListener('click', goToNextTheme);
   document.getElementById('random-theme-btn').addEventListener('click', goToRandomTheme);
@@ -1351,6 +1412,7 @@
   });
   setupListFilters();
   updateListModeToggleButton();
+  updateShuffleToggleButton();
   loadAnnouncement();
 
   // 吹き出し・強調表示を、DOM要素ごと、確実に消す
