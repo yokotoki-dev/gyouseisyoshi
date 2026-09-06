@@ -150,7 +150,7 @@
     background: var(--card-bg);
     border: 2px dashed var(--border);
     border-radius: 10px;
-    padding: 12px 12px 40px;
+    padding: 12px 12px 56px;
     text-align: center;
     cursor: pointer;
     overflow: visible;
@@ -492,6 +492,13 @@
   // リロードされたように見えてしまうため、ユーザーIDが実際に変わったときだけ反応する。
   let lastKnownUserId = undefined; // undefined = まだ一度も、確認していない
   supabaseClient.auth.onAuthStateChange((_event, session) => {
+    // Googleログイン(OAuth)の直後、URLの#以降に、アクセストークンなどの
+    // 機密情報が、そのまま残ってしまう。これを、履歴に残さない形で、消しておく。
+    // (このトークンは、URLに書かれたまま、共有・ブックマークされる危険がある)
+    if (window.location.hash && window.location.hash.includes('access_token')) {
+      history.replaceState(null, '', window.location.pathname + window.location.search);
+    }
+
     const userId = session?.user?.id || null;
     renderAuthArea(session?.user || null);
     if (userId === lastKnownUserId) return; // 前回と同じユーザーのままなら、何もしない
@@ -1429,6 +1436,21 @@
     clearBucketSelection();
     closeExplanationBubble();
   });
+
+  // ── URLに残る、認証トークンの後片付け ──────────────────
+  // onAuthStateChangeの中だけでチェックすると、イベントの発火と、
+  // URLへのハッシュの反映に、タイミングのズレ(レースコンディション)があり、
+  // 見逃すことが、Supabase側でも報告されている。そのため、ここでは、
+  // 独立して、短い間隔で、繰り返し確認する、より確実な方式にする。
+  // (Supabaseが、トークンを読み取り終えるまでの、猶予も、これで確保できる)
+  let hashCleanupAttempts = 0;
+  const hashCleanupTimer = setInterval(() => {
+    hashCleanupAttempts++;
+    if (window.location.hash && window.location.hash.includes('access_token')) {
+      history.replaceState(null, '', window.location.pathname + window.location.search);
+    }
+    if (hashCleanupAttempts >= 20) clearInterval(hashCleanupTimer); // 最大10秒間(500ms×20回)だけ確認する
+  }, 500);
 
   devSignIn().then(initListView);</script>
 </body>
