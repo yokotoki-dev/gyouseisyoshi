@@ -468,7 +468,7 @@
     }
     el.hidden = false;
     if (user) {
-      el.innerHTML = `<p class="auth-status">${user.email} でログイン中 <button class="auth-link-btn" id="logout-btn">ログアウト</button></p>`;
+      el.innerHTML = `<p class="auth-status">✓ ログイン中 <button class="auth-link-btn" id="logout-btn">ログアウト</button></p>`;
       document.getElementById('logout-btn').addEventListener('click', async () => {
         await supabaseClient.auth.signOut();
       });
