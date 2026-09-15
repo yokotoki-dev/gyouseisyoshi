@@ -558,10 +558,18 @@
   // テーマ単位のブックマーク・正答率を取得して themeSequence に反映する
   async function loadUserProgress() {
     const { data: { user } } = await supabaseClient.auth.getUser();
-    if (!user || !themeSequence.length) {
+    if (!user) {
       isPremiumUser = false;
+      // ログアウト時、前のユーザーの、進捗情報が、画面に残らないよう、明示的にリセットする
+      themeSequence.forEach(t => {
+        t.isBookmarked = false;
+        t.accuracy = null;
+        t.attemptCount = 0;
+        t.lastAnsweredAt = null;
+      });
       return;
     }
+    if (!themeSequence.length) return;
 
     const [
       { data: bookmarks, error: bookmarkErr },
