@@ -72,6 +72,7 @@
   .theme-link-main { display: flex; align-items: center; gap: 8px; }
   .theme-link-star { cursor: pointer; color: #c9ccd1; font-size: 16px; line-height: 1; }
   .theme-link-star.active { color: #f2a93b; }
+  .theme-link-lock { font-size: 13px; opacity: .6; }
   .theme-link-right { display: flex; align-items: center; gap: 10px; }
   .theme-link-accuracy { font-size: 12px; color: var(--muted); white-space: nowrap; }
   .theme-link-arrow { color: var(--muted); }
@@ -524,6 +525,7 @@
   let sortMode = 'none'; // 'none' | 'accuracy'(正答率が低い順) | 'lastAnswered'(最終回答日が古い順)
   let themeSequence = []; // 全カテゴリを横断した「カテゴリ順→テーマ順」の一覧(ブックマーク・履歴を含む)
   let categoryList = []; // カテゴリのプルダウン用一覧
+  let isPremiumUser = false; // 一覧画面で、有料テーマにロックアイコンを表示するかの判定に使う
   let isViewMode = false; // 閲覧モード(最初から全カード仕分け済みの状態で表示。記録は保存しない)
   // バケツの位置をシャッフルするか。ユーザーが選んだ、設定は、
   // アプリ全体で共通の、1つの設定として、ブラウザに覚えさせておく
@@ -548,7 +550,7 @@
     categoryList.forEach(c => {
       (themes || [])
         .filter(t => t.category_id === c.id)
-        .forEach(t => themeSequence.push({ ...t, categoryName: c.name, isBookmarked: false, accuracy: null, attemptCount: 0 }));
+        .forEach(t => themeSequence.push({ ...t, categoryName: c.name, isFreeCategory: !!c.is_free, isBookmarked: false, accuracy: null, attemptCount: 0 }));
     });
     await loadUserProgress();
   }
@@ -556,17 +558,23 @@
   // テーマ単位のブックマーク・正答率を取得して themeSequence に反映する
   async function loadUserProgress() {
     const { data: { user } } = await supabaseClient.auth.getUser();
-    if (!user || !themeSequence.length) return;
+    if (!user || !themeSequence.length) {
+      isPremiumUser = false;
+      return;
+    }
 
     const [
       { data: bookmarks, error: bookmarkErr },
-      { data: accuracyRows, error: accuracyErr }
+      { data: accuracyRows, error: accuracyErr },
+      { data: ent }
     ] = await Promise.all([
       supabaseClient.from('user_bookmarks').select('theme_id').eq('user_id', user.id),
-      supabaseClient.from('user_theme_accuracy').select('theme_id, total, correct, last_answered_at').eq('user_id', user.id)
+      supabaseClient.from('user_theme_accuracy').select('theme_id, total, correct, last_answered_at').eq('user_id', user.id),
+      supabaseClient.from('entitlements').select('is_premium').eq('user_id', user.id).maybeSingle()
     ]);
     if (bookmarkErr) console.error('ブックマーク取得エラー:', bookmarkErr);
     if (accuracyErr) console.error('正答率取得エラー:', accuracyErr);
+    isPremiumUser = ent?.is_premium || false;
 
     const bookmarkedThemeIds = new Set((bookmarks || []).map(b => b.theme_id));
 
@@ -714,10 +722,14 @@
       ? formatLastAnsweredAt(t.lastAnsweredAt)
       : (t.accuracy === null ? '未挑戦' : `正答率 ${Math.round(t.accuracy * 100)}%`);
 
+    // 有料カテゴリのテーマで、まだ購入していないユーザーには、鍵アイコンを表示する
+    const isLocked = !t.isFreeCategory && !isPremiumUser;
+
     link.innerHTML = `
       <span class="theme-link-main">
         <span class="theme-link-star ${t.isBookmarked ? 'active' : ''}">${t.isBookmarked ? '★' : '☆'}</span>
         <span>${t.title}</span>
+        ${isLocked ? '<span class="theme-link-lock" title="有料テーマ">🔒</span>' : ''}
       </span>
       <span class="theme-link-right">
         <span class="theme-link-accuracy">${rightText}</span>
