@@ -356,6 +356,7 @@
       <div class="sort-toggle-group">
         <button class="sort-toggle-btn" id="sort-toggle-btn">正答率が低い順に並べ替え</button>
         <button class="sort-toggle-btn" id="sort-by-date-btn">最終回答日が古い順に並べ替え</button>
+        <button class="sort-toggle-btn" id="sort-by-count-btn">回答回数が少ない順に並べ替え</button>
       </div>
       <div class="mode-switch">
         <span class="mode-badge" id="list-mode-badge">✏️ 仕分け中</span>
@@ -525,7 +526,7 @@
   let currentThemeId = null;
   let currentThemeShuffleAllowed = false; // 今のテーマが、DB側でシャッフルを許可されているか(themes.shuffle_buckets)
   let currentListFilter = 'all'; // 'all' | 'bookmark'
-  let sortMode = 'none'; // 'none' | 'accuracy'(正答率が低い順) | 'lastAnswered'(最終回答日が古い順)
+  let sortMode = 'none'; // 'none' | 'accuracy'(正答率が低い順) | 'lastAnswered'(最終回答日が古い順) | 'attempts'(周回数=回答回数÷カード枚数が少ない順)
   let themeSequence = []; // 全カテゴリを横断した「カテゴリ順→テーマ順」の一覧(ブックマーク・履歴を含む)
   let categoryList = []; // カテゴリのプルダウン用一覧
   let isPremiumUser = false; // 一覧画面で、有料テーマにロックアイコンを表示するかの判定に使う
@@ -535,25 +536,31 @@
   let isShuffleEnabled = localStorage.getItem('yokotoki_shuffle_buckets') === 'true';
   let activeThemeCategoryId = ''; // 問題画面での「次へ・ランダム」の対象範囲(カテゴリ)。空なら全カテゴリ横断
   let activeThemeBookmarkOnly = false; // 問題画面での「次へ・ランダム」の対象範囲(ブックマークのみか)
-  let activeThemeSortMode = 'none'; // 問題画面での「次へ」の並び順('none' | 'accuracy' | 'lastAnswered')
+  let activeThemeSortMode = 'none'; // 問題画面での「次へ」の並び順('none' | 'accuracy' | 'lastAnswered' | 'attempts')
 
   // ── 一覧画面: カテゴリ横断のテーマ一覧・絞り込み・画面遷移 ──
   async function buildThemeSequence() {
     const [
       { data: categories, error: catErr },
-      { data: themes, error: themeErr }
+      { data: themes, error: themeErr },
+      { data: questionCounts, error: countErr }
     ] = await Promise.all([
       supabaseClient.from('categories').select('*').order('sort_order'),
-      supabaseClient.from('themes').select('*').order('sort_order')
+      supabaseClient.from('themes').select('*').order('sort_order'),
+      supabaseClient.from('theme_question_counts').select('theme_id, question_count')
     ]);
     if (catErr) console.error('categories取得エラー:', catErr);
     if (themeErr) console.error('themes取得エラー:', themeErr);
+    // カード枚数のVIEWが未作成でも、並べ替え以外は動くようにする(周回数は回答回数で代用される)
+    if (countErr) console.warn('カード枚数の取得に失敗しました(回答回数で代用します):', countErr.message);
+    const questionCountById = {};
+    (questionCounts || []).forEach(r => { questionCountById[r.theme_id] = r.question_count; });
     categoryList = categories || [];
     themeSequence = [];
     categoryList.forEach(c => {
       (themes || [])
         .filter(t => t.category_id === c.id)
-        .forEach(t => themeSequence.push({ ...t, categoryName: c.name, isFreeCategory: !!c.is_free, isBookmarked: false, accuracy: null, attemptCount: 0 }));
+        .forEach(t => themeSequence.push({ ...t, categoryName: c.name, isFreeCategory: !!c.is_free, isBookmarked: false, accuracy: null, attemptCount: 0, questionCount: questionCountById[t.id] || 0 }));
     });
     await loadUserProgress();
   }
@@ -649,22 +656,7 @@
     const isCrossCategorySort = !categoryId && sortMode !== 'none';
 
     if (isCrossCategorySort) {
-      const sorted = filtered.slice();
-      if (sortMode === 'accuracy') {
-        sorted.sort((a, b) => {
-          if (a.accuracy === null && b.accuracy === null) return 0;
-          if (a.accuracy === null) return -1;
-          if (b.accuracy === null) return 1;
-          return a.accuracy - b.accuracy;
-        });
-      } else if (sortMode === 'lastAnswered') {
-        sorted.sort((a, b) => {
-          if (!a.lastAnsweredAt && !b.lastAnsweredAt) return 0;
-          if (!a.lastAnsweredAt) return -1;
-          if (!b.lastAnsweredAt) return 1;
-          return new Date(a.lastAnsweredAt) - new Date(b.lastAnsweredAt);
-        });
-      }
+      const sorted = filtered.slice().sort(getThemeComparator(sortMode));
       sorted.forEach(t => el.appendChild(buildThemeLink(t)));
       return;
     }
@@ -679,26 +671,9 @@
       group.themes.push(t);
     });
 
-    if (sortMode === 'accuracy') {
-      // カテゴリの区切りは保ったまま、各カテゴリの中だけ正答率が低い順(未挑戦は先頭)に並べ替える
-      groups.forEach(g => {
-        g.themes.sort((a, b) => {
-          if (a.accuracy === null && b.accuracy === null) return 0;
-          if (a.accuracy === null) return -1;
-          if (b.accuracy === null) return 1;
-          return a.accuracy - b.accuracy;
-        });
-      });
-    } else if (sortMode === 'lastAnswered') {
-      // カテゴリの区切りは保ったまま、各カテゴリの中だけ最終回答日が古い順(未挑戦は先頭)に並べ替える
-      groups.forEach(g => {
-        g.themes.sort((a, b) => {
-          if (!a.lastAnsweredAt && !b.lastAnsweredAt) return 0;
-          if (!a.lastAnsweredAt) return -1;
-          if (!b.lastAnsweredAt) return 1;
-          return new Date(a.lastAnsweredAt) - new Date(b.lastAnsweredAt);
-        });
-      });
+    if (sortMode !== 'none') {
+      // カテゴリの区切りは保ったまま、各カテゴリの中だけ並べ替える(未挑戦は先頭)
+      groups.forEach(g => g.themes.sort(getThemeComparator(sortMode)));
     }
 
     groups.forEach(g => {
@@ -716,6 +691,38 @@
     });
   }
 
+  // 周回数 = 回答回数 ÷ カード枚数。カード枚数が不明(0)のときは、回答回数そのものを使う
+  function getRounds(t) {
+    const attempts = t.attemptCount || 0;
+    return t.questionCount > 0 ? attempts / t.questionCount : attempts;
+  }
+
+  // 並べ替えモードごとの比較関数。一覧画面と「次へ」で同じ基準を使うため、1か所にまとめている。
+  // 未挑戦のテーマは常に先頭。同順位のときは元のテーマ順を保つ(sortは安定ソート)
+  function getThemeComparator(mode) {
+    if (mode === 'accuracy') {
+      return (a, b) => {
+        if (a.accuracy === null && b.accuracy === null) return 0;
+        if (a.accuracy === null) return -1;
+        if (b.accuracy === null) return 1;
+        return a.accuracy - b.accuracy;
+      };
+    }
+    if (mode === 'lastAnswered') {
+      return (a, b) => {
+        if (!a.lastAnsweredAt && !b.lastAnsweredAt) return 0;
+        if (!a.lastAnsweredAt) return -1;
+        if (!b.lastAnsweredAt) return 1;
+        return new Date(a.lastAnsweredAt) - new Date(b.lastAnsweredAt);
+      };
+    }
+    if (mode === 'attempts') {
+      // 周回数(回答回数 ÷ カード枚数)が少ない順。未挑戦=0が先頭になる
+      return (a, b) => getRounds(a) - getRounds(b);
+    }
+    return () => 0;
+  }
+
   // 「7/1に回答」のような、短い表示形式に整形する(未挑戦はnull)
   function formatLastAnsweredAt(isoString) {
     if (!isoString) return '未挑戦';
@@ -729,9 +736,15 @@
     link.className = 'theme-link';
     link.href = '#';
 
-    const rightText = sortMode === 'lastAnswered'
-      ? formatLastAnsweredAt(t.lastAnsweredAt)
-      : (t.accuracy === null ? '未挑戦' : `正答率 ${Math.round(t.accuracy * 100)}%`);
+    let rightText;
+    if (sortMode === 'lastAnswered') {
+      rightText = formatLastAnsweredAt(t.lastAnsweredAt);
+    } else if (sortMode === 'attempts') {
+      if (!t.attemptCount) rightText = '未挑戦';
+      else rightText = t.questionCount > 0 ? `${getRounds(t).toFixed(1)}回` : `${t.attemptCount}回回答`;
+    } else {
+      rightText = t.accuracy === null ? '未挑戦' : `正答率 ${Math.round(t.accuracy * 100)}%`;
+    }
 
     // 有料カテゴリのテーマで、まだ購入していないユーザーには、鍵アイコンを表示する
     const isLocked = !t.isFreeCategory && !isPremiumUser;
@@ -837,12 +850,15 @@
 
     const sortBtn = document.getElementById('sort-toggle-btn');
     const sortByDateBtn = document.getElementById('sort-by-date-btn');
+    const sortByCountBtn = document.getElementById('sort-by-count-btn');
 
     function updateSortButtons() {
       sortBtn.classList.toggle('active', sortMode === 'accuracy');
       sortBtn.textContent = sortMode === 'accuracy' ? 'テーマ順に戻す' : '正答率が低い順に並べ替え';
       sortByDateBtn.classList.toggle('active', sortMode === 'lastAnswered');
       sortByDateBtn.textContent = sortMode === 'lastAnswered' ? 'テーマ順に戻す' : '最終回答日が古い順に並べ替え';
+      sortByCountBtn.classList.toggle('active', sortMode === 'attempts');
+      sortByCountBtn.textContent = sortMode === 'attempts' ? 'テーマ順に戻す' : '回答回数が少ない順に並べ替え';
     }
 
     sortBtn.addEventListener('click', () => {
@@ -852,6 +868,11 @@
     });
     sortByDateBtn.addEventListener('click', () => {
       sortMode = sortMode === 'lastAnswered' ? 'none' : 'lastAnswered';
+      updateSortButtons();
+      applyListFilter();
+    });
+    sortByCountBtn.addEventListener('click', () => {
+      sortMode = sortMode === 'attempts' ? 'none' : 'attempts';
       updateSortButtons();
       applyListFilter();
     });
@@ -908,23 +929,8 @@
       if (activeThemeBookmarkOnly && !t.isBookmarked) return false;
       return true;
     });
-    if (activeThemeSortMode === 'accuracy') {
-      // 一覧画面と同じ基準: 正答率が低い順(未挑戦は先頭)に並べ替える
-      pool.sort((a, b) => {
-        if (a.accuracy === null && b.accuracy === null) return 0;
-        if (a.accuracy === null) return -1;
-        if (b.accuracy === null) return 1;
-        return a.accuracy - b.accuracy;
-      });
-    } else if (activeThemeSortMode === 'lastAnswered') {
-      // 一覧画面と同じ基準: 最終回答日が古い順(未挑戦は先頭)に並べ替える
-      pool.sort((a, b) => {
-        if (!a.lastAnsweredAt && !b.lastAnsweredAt) return 0;
-        if (!a.lastAnsweredAt) return -1;
-        if (!b.lastAnsweredAt) return 1;
-        return new Date(a.lastAnsweredAt) - new Date(b.lastAnsweredAt);
-      });
-    }
+    // 一覧画面と同じ基準で並べ替える
+    if (activeThemeSortMode !== 'none') pool.sort(getThemeComparator(activeThemeSortMode));
     return pool;
   }
 
