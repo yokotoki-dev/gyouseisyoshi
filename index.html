@@ -1368,9 +1368,20 @@
       const hasSameTextCards = currentQuestions.some(q =>
         q.id !== question.id && q.card_text.trim() === question.card_text.trim()
       );
-      const incorrectMessage = hasSameTextCards
-        ? `「${question.card_text.trim()}」は、このバケツには入りません。`
-        : question.explanation;
+      // 同じ文言のカードが、すでにこのバケツに仕分け済みの場合(例: 2枚目を同じバケツに入れようとした)は、
+      // 「入りません」ではなく「すでに入っています」と伝える
+      const alreadyInBucket = hasSameTextCards && currentQuestions.some(q =>
+        q.id !== question.id &&
+        sortedIds.has(q.id) &&
+        q.card_text.trim() === question.card_text.trim() &&
+        q.answer_bucket_id === bucketId
+      );
+      let incorrectMessage = question.explanation;
+      if (alreadyInBucket) {
+        incorrectMessage = `「${question.card_text.trim()}」は、すでにこのバケツに入っています。このカードは、別のバケツに入ります。`;
+      } else if (hasSameTextCards) {
+        incorrectMessage = `「${question.card_text.trim()}」は、このバケツには入りません。`;
+      }
 
       const cardEl = document.querySelector(`.card[data-question-id="${questionId}"]`);
       if (cardEl) {
