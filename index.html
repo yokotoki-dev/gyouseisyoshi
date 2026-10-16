@@ -1310,8 +1310,25 @@
 
   // ── 5. 正誤判定・フィードバック・ログ保存 ────────────────
   async function handleAnswer(questionId, bucketId) {
-    const question = currentQuestions.find(q => q.id === questionId);
+    let question = currentQuestions.find(q => q.id === questionId);
     if (!question) return;
+
+    // 同じ文言のカードが複数ある場合(例: 「有権者の50分の1」が議員の解職請求用と長の解職請求用で
+    // 2枚ある)、画面上は見分けがつかない。選んだカード自身が不正解でも、同じ文言で
+    // 「このバケツが正解」の未仕分けカードが残っていれば、そちらを使って判定する。
+    // (解説・解答ログも、実際に正解扱いにしたカードのものになる)
+    if (question.answer_bucket_id !== bucketId) {
+      const sameTextCard = currentQuestions.find(q =>
+        q.id !== question.id &&
+        !sortedIds.has(q.id) &&
+        q.card_text.trim() === question.card_text.trim() &&
+        q.answer_bucket_id === bucketId
+      );
+      if (sameTextCard) {
+        question = sameTextCard;
+        questionId = sameTextCard.id;
+      }
+    }
 
     const isCorrect = question.answer_bucket_id === bucketId;
 
@@ -1346,15 +1363,24 @@
     renderDeck();
 
     if (!isCorrect) {
+      // 同じ文言のカードがこのテーマに2枚以上あるときは、どのカードをタップしたかで解説が
+      // 変わってしまうため、カード固有の解説ではなく、共通の文を表示する
+      const hasSameTextCards = currentQuestions.some(q =>
+        q.id !== question.id && q.card_text.trim() === question.card_text.trim()
+      );
+      const incorrectMessage = hasSameTextCards
+        ? `「${question.card_text.trim()}」は、このバケツには入りません。`
+        : question.explanation;
+
       const cardEl = document.querySelector(`.card[data-question-id="${questionId}"]`);
       if (cardEl) {
         // 不正解の場合、まだ正しい判断ができていないため、カードの選択(青い枠)を、そのまま維持する
         selectedQuestionId = questionId;
         selectedCardEl = cardEl;
         cardEl.classList.add('selected');
-        showIncorrectExplanation(cardEl, question.explanation);
+        showIncorrectExplanation(cardEl, incorrectMessage);
       } else {
-        showFeedback(isCorrect, question.explanation);
+        showFeedback(isCorrect, incorrectMessage);
       }
     }
 
