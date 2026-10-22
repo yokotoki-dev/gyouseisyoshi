@@ -169,6 +169,17 @@
   }
   .bucket.drag-over { border-style: solid; border-color: var(--primary-light); background: #eef4fa; }
   .bucket.selected { border-style: solid; border-color: var(--primary-light); background: #eef4fa; box-shadow: 0 0 0 2px var(--primary-light) inset; }
+  /* 不正解のとき、カードが画面の外にあっても気づけるよう、選んだバケツ側で知らせる */
+  .bucket.wrong-flash { animation: bucket-wrong .5s ease; border-style: solid; border-color: var(--incorrect); background: var(--incorrect-bg); }
+  .bucket-wrong-label { position: absolute; left: 0; right: 0; bottom: 14px; text-align: center; font-size: 13px; font-weight: 600; color: var(--incorrect); pointer-events: none; }
+  @keyframes bucket-wrong {
+    0%, 100% { transform: translateX(0); }
+    20% { transform: translateX(-6px); }
+    40% { transform: translateX(6px); }
+    60% { transform: translateX(-4px); }
+    80% { transform: translateX(4px); }
+  }
+  @media (prefers-reduced-motion: reduce) { .bucket.wrong-flash { animation: none; } }
   .bucket-cards { display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; }
   .card.sorted {
     position: relative;
@@ -1309,6 +1320,26 @@
   }
 
   // ── 5. 正誤判定・フィードバック・ログ保存 ────────────────
+  // 不正解のとき、選んだバケツを赤く光らせて揺らし、「✕ 違います」を短く表示する。
+  // カードが画面の下にあって、バケツ側からは何も見えない場合でも、間違えたことに気づけるようにするため
+  function flashWrongBucket(bucketId) {
+    const bucketEl = document.querySelector(`.bucket[data-bucket-id="${bucketId}"]`);
+    if (!bucketEl) return;
+    clearTimeout(bucketEl._wrongTimer);
+    bucketEl.classList.remove('wrong-flash');
+    bucketEl.querySelectorAll('.bucket-wrong-label').forEach(el => el.remove());
+    void bucketEl.offsetWidth; // 連続で間違えたときも、アニメーションを最初から再生するため
+    bucketEl.classList.add('wrong-flash');
+    const label = document.createElement('div');
+    label.className = 'bucket-wrong-label';
+    label.textContent = '✕ 違います';
+    bucketEl.appendChild(label);
+    bucketEl._wrongTimer = setTimeout(() => {
+      bucketEl.classList.remove('wrong-flash');
+      label.remove();
+    }, 1200);
+  }
+
   async function handleAnswer(questionId, bucketId) {
     let question = currentQuestions.find(q => q.id === questionId);
     if (!question) return;
@@ -1363,6 +1394,8 @@
     renderDeck();
 
     if (!isCorrect) {
+      flashWrongBucket(bucketId);
+
       // 同じ文言のカードがこのテーマに2枚以上あるときは、どのカードをタップしたかで解説が
       // 変わってしまうため、カード固有の解説ではなく、共通の文を表示する
       const hasSameTextCards = currentQuestions.some(q =>
