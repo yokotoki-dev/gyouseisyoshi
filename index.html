@@ -345,6 +345,44 @@
     cursor: pointer;
   }
   .theme-bookmark-btn.active { color: #b8860b; border-color: #f2a93b; }
+
+  /* ── 画面下の固定バー: バケツの名前が、画面から外れたときだけ、バケツ名のボタンを並べて出す ── */
+  .bucket-bar {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 10; /* 吹き出し(z-index: 20)より奥に置く */
+    background: rgba(255, 255, 255, .97);
+    border-top: 1px solid var(--border);
+    box-shadow: 0 -4px 14px rgba(28, 46, 74, .14);
+    padding: 8px 10px calc(10px + env(safe-area-inset-bottom));
+    transform: translateY(105%);
+    visibility: hidden;
+    transition: transform .2s ease, visibility 0s linear .2s;
+  }
+  .bucket-bar[hidden] { display: none; }
+  .bucket-bar.show { transform: none; visibility: visible; transition: transform .2s ease, visibility 0s; }
+  .bucket-bar-inner { display: grid; gap: 6px; max-width: 720px; margin: 0 auto; }
+  .bucket-bar-chip {
+    min-height: 40px;
+    padding: 4px 6px;
+    border: 1.5px solid var(--border);
+    border-radius: 8px;
+    background: #fff;
+    color: var(--primary);
+    font-family: inherit;
+    font-size: 12px;
+    font-weight: 600;
+    line-height: 1.3;
+    cursor: pointer;
+  }
+  .bucket-bar-chip-title { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .bucket-bar-chip.selected { border-color: var(--primary-light); background: #eef4fa; box-shadow: 0 0 0 2px var(--primary-light) inset; }
+  .bucket-bar-chip.wrong-flash { animation: bucket-wrong .5s ease; border-color: var(--incorrect); background: var(--incorrect-bg); color: var(--incorrect); }
+  /* バーを出している間、ページの一番下のボタンが、バーに隠れないよう、余白を足す */
+  body.has-bucket-bar .app { padding-bottom: calc(var(--bucket-bar-h, 0px) + 40px); }
+  @media (prefers-reduced-motion: reduce) { .bucket-bar-chip.wrong-flash { animation: none; } .bucket-bar { transition: none; } }
 </style>
 </head>
 <body>
@@ -419,6 +457,11 @@
       <button class="next-theme-btn" id="next-theme-btn">次のテーマへ →</button>
     </div>
   </div>
+</div>
+
+<!-- 画面下の固定バー(バケツの名前が、画面から外れたときだけ出る) -->
+<div id="bucket-bar" class="bucket-bar" hidden>
+  <div id="bucket-bar-inner" class="bucket-bar-inner"></div>
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
@@ -534,6 +577,9 @@
   let selectedBucketEl = null;
   let openBubbleQuestionId = null; // 今、吹き出しを開いている、カードのquestion_id(Vanilla JSで、直接管理する)
   let sortedIds = new Set();
+  let bucketBarObserver = null; // 固定バーを出すかの判定に使う、バケツ名の可視判定
+  let bucketTitleVisible = {}; // バケツID → バケツ名(タイトル)が、画面内に完全に見えているか
+  let bucketBarHeight = 0; // 固定バーの高さ(px)
   let currentThemeId = null;
   let currentThemeShuffleAllowed = false; // 今のテーマが、DB側でシャッフルを許可されているか(themes.shuffle_buckets)
   let currentListFilter = 'all'; // 'all' | 'bookmark'
@@ -926,6 +972,7 @@
   }
 
   async function showListView() {
+    hideBucketBar();
     document.getElementById('practice-view').hidden = true;
     document.getElementById('list-view').hidden = false;
     // 問題画面で解答した内容(正答率・ブックマーク)を一覧に反映し直す
@@ -975,6 +1022,7 @@
     currentThemeId = themeId;
     // 通信を待つ間に前回の表示が一瞬残らないよう、真っ先にリセットする
     document.getElementById('feedback').hidden = true;
+    hideBucketBar();
     document.getElementById('buckets').innerHTML = '';
     document.getElementById('deck').innerHTML = '';
     document.getElementById('theme-instruction').textContent = '読み込み中...';
@@ -1061,6 +1109,7 @@
 
   // ロック画面と学習画面の出し分け
   function showLockScreen() {
+    hideBucketBar();
     document.getElementById('buckets').hidden = true;
     document.getElementById('deck').hidden = true;
     document.getElementById('lock-screen').hidden = false;
@@ -1069,6 +1118,130 @@
     document.getElementById('buckets').hidden = false;
     document.getElementById('deck').hidden = false;
     document.getElementById('lock-screen').hidden = true;
+  }
+
+  // ── 画面下の固定バー ────────────────────────────────
+  // カードが多く、下までスクロールすると、バケツの名前が画面から外れる。
+  // 「バケツ名が、1つでも、画面内に完全に見えていない」間だけ、バケツ名のボタンを並べたバーを出す。
+  // バーのボタンは、バケツ本体を押したときと、まったく同じ動き(activateBucket)になる。
+  function bucketElById(bucketId) {
+    return document.querySelector(`.bucket[data-bucket-id="${bucketId}"]`);
+  }
+  function getBucketBarChip(bucketId) {
+    return document.querySelector(`#bucket-bar .bucket-bar-chip[data-bucket-id="${bucketId}"]`);
+  }
+  // 今、バーが画面に出ているなら、その高さ。出ていなければ0
+  function bucketBarVisibleHeight() {
+    const bar = document.getElementById('bucket-bar');
+    return (!bar.hidden && bar.classList.contains('show')) ? bar.offsetHeight : 0;
+  }
+  // 要素が、画面の中(バーに隠れない範囲)に、収まって見えているか
+  function isVisibleAboveBar(el) {
+    const margin = 8;
+    const r = el.getBoundingClientRect();
+    return r.top >= margin && r.bottom <= window.innerHeight - bucketBarVisibleHeight() - margin;
+  }
+
+  function hideBucketBar() {
+    if (bucketBarObserver) { bucketBarObserver.disconnect(); bucketBarObserver = null; }
+    bucketTitleVisible = {};
+    const bar = document.getElementById('bucket-bar');
+    bar.classList.remove('show');
+    bar.querySelectorAll('.explanation-bubble-wrap').forEach(el => el.remove());
+    bar.hidden = true;
+    document.body.classList.remove('has-bucket-bar');
+  }
+
+  function renderBucketBar(orderedBuckets) {
+    // 閲覧モードでは、仕分けをしないので、バーは出さない
+    if (isViewMode || !orderedBuckets.length) { hideBucketBar(); return; }
+    const bar = document.getElementById('bucket-bar');
+    const inner = document.getElementById('bucket-bar-inner');
+    inner.innerHTML = '';
+    const n = orderedBuckets.length;
+    inner.style.gridTemplateColumns = `repeat(${n <= 3 ? n : n <= 6 ? 3 : 4}, 1fr)`;
+    orderedBuckets.forEach(bucket => {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'bucket-bar-chip';
+      btn.dataset.bucketId = bucket.id;
+      btn.dataset.title = bucket.title;
+      const span = document.createElement('span');
+      span.className = 'bucket-bar-chip-title';
+      span.textContent = bucket.title; // textContentで入れるので、名前に記号が入っても安全
+      btn.appendChild(span);
+      inner.appendChild(btn);
+    });
+    bar.hidden = false;
+    document.body.classList.add('has-bucket-bar');
+    syncBucketBarSelection();
+    setupBucketBarObserver();
+  }
+
+  // 各バケツの名前(見出し)が、画面内に完全に見えているかを監視する。
+  // バーが覆う、画面下の部分は、「画面の外」として数える(バーを出した結果、名前がバーの下に隠れても、
+  // バーが消えて、またちらつく、ということが起きないようにするため)
+  function setupBucketBarObserver() {
+    if (bucketBarObserver) bucketBarObserver.disconnect();
+    const bar = document.getElementById('bucket-bar');
+    if (bar.hidden) return;
+    bucketBarHeight = bar.offsetHeight;
+    document.documentElement.style.setProperty('--bucket-bar-h', bucketBarHeight + 'px');
+    bucketTitleVisible = {};
+    document.querySelectorAll('#buckets .bucket').forEach(b => { bucketTitleVisible[b.dataset.bucketId] = false; });
+    bucketBarObserver = new IntersectionObserver(entries => {
+      entries.forEach(e => {
+        const id = e.target.closest('.bucket').dataset.bucketId;
+        bucketTitleVisible[id] = e.intersectionRatio >= 0.95;
+      });
+      updateBucketBar();
+    }, { rootMargin: `0px 0px -${bucketBarHeight}px 0px`, threshold: [0, 0.95, 1] });
+    document.querySelectorAll('#buckets .bucket .bucket-title').forEach(t => bucketBarObserver.observe(t));
+  }
+
+  function updateBucketBar() {
+    const bar = document.getElementById('bucket-bar');
+    if (bar.hidden) return;
+    const ids = Object.keys(bucketTitleVisible);
+    const show = ids.length > 0 && ids.some(id => !bucketTitleVisible[id]);
+    bar.classList.toggle('show', show);
+    if (!show) {
+      // バーが引っ込んだら、バーから出していた解説の吹き出しも、一緒に閉じる(出し元がなくなるため)
+      const wraps = bar.querySelectorAll('.explanation-bubble-wrap');
+      if (wraps.length) closeExplanationBubble();
+    }
+  }
+
+  function syncBucketBarSelection() {
+    document.querySelectorAll('#bucket-bar .bucket-bar-chip').forEach(btn => {
+      btn.classList.toggle('selected', btn.dataset.bucketId === selectedBucketId);
+    });
+  }
+
+  // バケツを押したときの共通の動き(バケツ本体・バーのボタンの、どちらから押しても同じ)
+  function activateBucket(bucketId) {
+    // すでにカードを選択中なら、バケツを選んだ瞬間に判定する(カード→バケツの順、従来通り)
+    if (selectedQuestionId) {
+      const questionId = selectedQuestionId;
+      clearCardSelection();
+      closeExplanationBubble();
+      handleAnswer(questionId, bucketId);
+      return;
+    }
+
+    // 同じバケツをもう一度タップしたら、選択をキャンセルする
+    if (selectedBucketId === bucketId) {
+      clearBucketSelection();
+      return;
+    }
+
+    // バケツを先に選ぶ(バケツ→カードの順)
+    closeExplanationBubble();
+    if (selectedBucketEl) selectedBucketEl.classList.remove('selected');
+    selectedBucketId = bucketId;
+    selectedBucketEl = bucketElById(bucketId);
+    if (selectedBucketEl) selectedBucketEl.classList.add('selected');
+    syncBucketBarSelection();
   }
 
   // ── 3. バケツの描画(タップ/ドロップの両方を受け付ける) ───
@@ -1097,28 +1270,7 @@
           return;
         }
         if (isViewMode) return;
-
-        // すでにカードを選択中なら、バケツを選んだ瞬間に判定する(カード→バケツの順、従来通り)
-        if (selectedQuestionId) {
-          const questionId = selectedQuestionId;
-          clearCardSelection();
-          closeExplanationBubble();
-          handleAnswer(questionId, bucket.id);
-          return;
-        }
-
-        // 同じバケツをもう一度タップしたら、選択をキャンセルする
-        if (selectedBucketId === bucket.id) {
-          clearBucketSelection();
-          return;
-        }
-
-        // バケツを先に選ぶ(バケツ→カードの順)
-        closeExplanationBubble();
-        if (selectedBucketEl) selectedBucketEl.classList.remove('selected');
-        selectedBucketId = bucket.id;
-        selectedBucketEl = div;
-        div.classList.add('selected');
+        activateBucket(bucket.id);
       });
 
       // ドラッグ&ドロップで仕分け(PC向け)
@@ -1164,6 +1316,9 @@
         bucketCardsEl.appendChild(chip);
       });
     }
+
+    // 画面下の固定バーも、同じ並びで作り直す(シャッフル後の並びも反映される)
+    renderBucketBar(orderedBuckets);
   }
 
   // ── 4. 問題カードの描画 ──────────────────────────────
@@ -1220,6 +1375,7 @@
     if (selectedBucketEl) selectedBucketEl.classList.remove('selected');
     selectedBucketId = null;
     selectedBucketEl = null;
+    syncBucketBarSelection();
   }
 
   // 仕分け済みチップをタップしたときの共通処理。
@@ -1228,7 +1384,9 @@
   // 相性が悪く、ページのリロードを引き起こすことが分かったため、Vanilla JSに戻した)。
   // keepBucketSelected: trueの場合、バケツの選択(連続投入のための状態)は解除しない。
   // 「②バケツ→カード」の流れで、正解した、まさにその瞬間に使う。
-  function showCardExplanation(chipEl, questionId, explanation, keepBucketSelected) {
+  // barAnchorEl: 指定すると、吹き出しを、そのバーのボタンから上向きに出す
+  // (入ったカードが、画面の外にあって、そのカードからの吹き出しが見えないとき用)
+  function showCardExplanation(chipEl, questionId, explanation, keepBucketSelected, barAnchorEl) {
     clearCardSelection();
     if (!keepBucketSelected) clearBucketSelection();
     document.getElementById('feedback').hidden = true; // 以前の正解時に出た、画面下の解説を隠す
@@ -1252,11 +1410,21 @@
     bubble.className = 'explanation-bubble';
     bubble.textContent = explanation;
     wrap.appendChild(bubble);
-    chipEl.appendChild(wrap);
+    if (barAnchorEl) {
+      // バーの中に置き、バーのボタンの真上に、位置を合わせる(バーを基準にするので、スマホの画面の高さの変化にも強い)
+      const bar = document.getElementById('bucket-bar');
+      const barRect = bar.getBoundingClientRect();
+      const btnRect = barAnchorEl.getBoundingClientRect();
+      wrap.style.left = (btnRect.left + btnRect.width / 2 - barRect.left) + 'px';
+      wrap.style.bottom = (barRect.bottom - btnRect.top + 12) + 'px';
+      bar.appendChild(wrap);
+    } else {
+      chipEl.appendChild(wrap);
+    }
 
     requestAnimationFrame(() => {
       wrap.classList.add('show');
-      adjustBubblePosition(wrap, bubble);
+      adjustBubblePosition(wrap, bubble, !!barAnchorEl);
     });
   }
 
@@ -1280,15 +1448,17 @@
   }
 
   // 吹き出しが、画面の左右・上端からはみ出さないよう、表示後に位置・高さを調整する
-  function adjustBubblePosition(wrap, bubble) {
+  // 画面の下端は、バーが出ているときは、バーの上端とする。fromBar: バーのボタンから出す吹き出し(下向きには切り替えない)
+  function adjustBubblePosition(wrap, bubble, fromBar) {
     const margin = 8;
+    const bottomLimit = window.innerHeight - bucketBarVisibleHeight();
     const minHeightNeeded = 80; // 最低限、これだけの高さが確保できないなら、下向きに切り替える
 
     // 上に表示した場合の、実際に確保できる高さを、先に見積もる
     const rectAbove = wrap.getBoundingClientRect();
     const availableAbove = rectAbove.bottom - margin;
 
-    if (rectAbove.top < margin && availableAbove < minHeightNeeded) {
+    if (!fromBar && rectAbove.top < margin && availableAbove < minHeightNeeded) {
       // 上のスペースが、足りないので、下向きに切り替える
       wrap.classList.add('below');
     }
@@ -1308,9 +1478,9 @@
     const updatedRect = wrap.getBoundingClientRect();
     if (wrap.classList.contains('below')) {
       // 下向きのときは、画面の下端から、はみ出していないかを確認する
-      if (updatedRect.bottom > window.innerHeight - margin) {
-        const available = (window.innerHeight - margin) - updatedRect.top;
-        bubble.style.maxHeight = available + 'px';
+      if (updatedRect.bottom > bottomLimit - margin) {
+        const available = (bottomLimit - margin) - updatedRect.top;
+        bubble.style.maxHeight = Math.max(60, available) + 'px';
       }
     } else if (updatedRect.top < margin) {
       // 上向きのままの場合、それでも上端からはみ出すなら、高さを縮める
@@ -1323,7 +1493,22 @@
   // 不正解のとき、選んだバケツを赤く光らせて揺らし、「✕ 違います」を短く表示する。
   // カードが画面の下にあって、バケツ側からは何も見えない場合でも、間違えたことに気づけるようにするため
   function flashWrongBucket(bucketId) {
-    const bucketEl = document.querySelector(`.bucket[data-bucket-id="${bucketId}"]`);
+    // 固定バーが出ているときは、バーのボタンも、同じように揺らす(こちらは、必ず画面内にある)
+    const barBtn = getBucketBarChip(bucketId);
+    if (barBtn) {
+      const titleEl = barBtn.querySelector('.bucket-bar-chip-title');
+      clearTimeout(barBtn._wrongTimer);
+      barBtn.classList.remove('wrong-flash');
+      void barBtn.offsetWidth;
+      barBtn.classList.add('wrong-flash');
+      titleEl.textContent = '✕ 違います';
+      barBtn._wrongTimer = setTimeout(() => {
+        barBtn.classList.remove('wrong-flash');
+        titleEl.textContent = barBtn.dataset.title;
+      }, 1200);
+    }
+
+    const bucketEl = bucketElById(bucketId);
     if (!bucketEl) return;
     clearTimeout(bucketEl._wrongTimer);
     bucketEl.classList.remove('wrong-flash');
@@ -1378,7 +1563,11 @@
         bucketCardsEl.appendChild(chip);
         // 正解した、まさにその瞬間も、吹き出しで解説を表示する(画面下の解説エリアは使わない)。
         // 「②バケツ→カード」で、連続してカードを入れている最中は、バケツの選択を維持したままにする
-        showCardExplanation(chip, questionId, question.explanation, selectedBucketId === bucketId);
+        // ただし、入ったカードが画面の外にあり、固定バーが出ているときは、バーのそのバケツのボタンから出す
+        // (そうしないと、解説が、画面の外に出て、読めない)
+        const barBtn = getBucketBarChip(bucketId);
+        const useBar = !!barBtn && bucketBarVisibleHeight() > 0 && !isVisibleAboveBar(chip);
+        showCardExplanation(chip, questionId, question.explanation, selectedBucketId === bucketId, useBar ? barBtn : null);
       }
     } else {
       // 不正解の場合、カードはデッキに残ったままだが、renderDeck()で作り直されるため、
@@ -1528,9 +1717,25 @@
     openBubbleQuestionId = null;
   }
 
+  // 固定バーのボタンを押したときは、バケツ本体を押したときと同じ動きにする
+  document.getElementById('bucket-bar').addEventListener('click', e => {
+    const btn = e.target.closest('.bucket-bar-chip');
+    if (btn && !isViewMode) activateBucket(btn.dataset.bucketId);
+  });
+  // 画面の向きや幅が変わると、バーの高さも変わるので、判定の基準を取り直す
+  let bucketBarResizeTimer = null;
+  window.addEventListener('resize', () => {
+    clearTimeout(bucketBarResizeTimer);
+    bucketBarResizeTimer = setTimeout(() => {
+      if (!document.getElementById('bucket-bar').hidden) setupBucketBarObserver();
+    }, 150);
+  });
+
   // カード・バケツ以外の何もない場所をタップしたら、選択中の状態をまとめて解除する
   document.addEventListener('click', e => {
     if (e.target.closest('.card') || e.target.closest('.bucket')) return;
+    // 固定バー(ボタンと、そこから出た吹き出し)は、バケツと同じ扱い。ここで選択を解除してはいけない
+    if (e.target.closest('.bucket-bar') || e.target.closest('.explanation-bubble-wrap')) return;
     clearCardSelection();
     clearBucketSelection();
     closeExplanationBubble();
