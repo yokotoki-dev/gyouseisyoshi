@@ -53,6 +53,32 @@
   .search-input { width: 100%; box-sizing: border-box; padding: 10px 12px; border-radius: 8px; border: 1px solid var(--border); background: var(--card-bg); color: var(--ink); font-size: 16px; font-family: inherit; }
   .search-input:focus { outline: none; border-color: var(--primary-light); box-shadow: 0 0 0 2px var(--primary-light) inset; }
   .search-status { font-size: 12px; color: var(--muted); margin: 0 0 12px; line-height: 1.6; white-space: pre-line; }
+  /* テーマごとのメモ */
+  .memo { margin: 0 0 16px; }
+  .memo-toggle { display: flex; align-items: center; gap: 8px; width: 100%; padding: 10px 14px; background: var(--card-bg); border: 1px solid var(--border); border-radius: 8px; font: inherit; font-size: 14px; color: var(--ink); text-align: left; cursor: pointer; }
+  .memo-toggle-arrow { margin-left: auto; color: var(--muted); transition: transform .15s; }
+  .memo-toggle[aria-expanded="true"] .memo-toggle-arrow { transform: rotate(180deg); }
+  .memo-badge { font-size: 11px; color: var(--primary); background: var(--review-bg); border-radius: 10px; padding: 2px 8px; }
+  .memo-body { margin-top: 8px; padding: 12px 14px; background: var(--card-bg); border: 1px solid var(--border); border-radius: 8px; }
+  .memo-view { font-size: 14px; line-height: 1.7; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--ink); }
+  .memo-view a { color: var(--primary-light); text-decoration: underline; }
+  .memo-view.empty { color: var(--muted); cursor: pointer; }
+  .memo-actions { display: flex; justify-content: flex-end; margin-top: 8px; }
+  .memo-actions[hidden] { display: none; }
+  .memo-actions { gap: 8px; }
+  .memo-delete-btn { color: var(--incorrect); }
+  .memo-delete-confirm { margin-top: 8px; padding: 10px 12px; border: 1px solid var(--incorrect); border-radius: 8px; font-size: 13px; }
+  .memo-delete-confirm p { margin: 0 0 8px; }
+  .memo-delete-confirm-buttons { display: flex; justify-content: flex-end; gap: 8px; }
+  .memo-delete-yes { background: var(--incorrect); color: #fff; border-color: var(--incorrect); }   /* display指定が、hidden属性に勝ってしまうため */
+  .memo-textarea { display: block; width: 100%; box-sizing: border-box; min-height: 8em; padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; background: #fff; color: var(--ink); font-size: 16px; line-height: 1.6; font-family: inherit; resize: vertical; }
+  .memo-textarea:focus { outline: none; border-color: var(--primary-light); box-shadow: 0 0 0 2px var(--primary-light) inset; }
+  .memo-editor-footer { display: flex; align-items: center; justify-content: space-between; margin-top: 8px; font-size: 12px; color: var(--muted); }
+  .memo-status { margin: 8px 0 0; font-size: 12px; color: var(--muted); min-height: 1.2em; }
+  .memo-status.error { color: var(--incorrect); }
+  .memo-retry-btn { border: 1px solid var(--border); background: var(--card-bg); border-radius: 12px; padding: 2px 10px; font-size: 12px; color: var(--ink); cursor: pointer; }
+  /* メモを入力している間は、スマホのキーボードと重ならないよう、画面下の固定バーを隠す */
+  body.memo-editing .bucket-bar { display: none; }
   .category-group { margin-bottom: 20px; }
   .category-heading { font-size: 13px; color: var(--muted); margin: 0 0 8px; font-weight: 600; }
   .theme-link {
@@ -438,6 +464,35 @@
     </div>
     <p id="theme-breadcrumb" class="theme-breadcrumb"></p>
     <div id="theme-instruction">読み込み中...</div>
+    <section id="memo" class="memo" hidden>
+      <button type="button" id="memo-toggle" class="memo-toggle" aria-expanded="false" aria-controls="memo-body">
+        <span>📝 メモ</span>
+        <span id="memo-badge" class="memo-badge" hidden>あり</span>
+        <span class="memo-toggle-arrow" aria-hidden="true">▾</span>
+      </button>
+      <div id="memo-body" class="memo-body" hidden>
+        <div id="memo-view" class="memo-view"></div>
+        <div id="memo-view-actions" class="memo-actions">
+          <button type="button" id="memo-delete-btn" class="mode-toggle-btn memo-delete-btn">🗑 削除</button>
+          <button type="button" id="memo-edit-btn" class="mode-toggle-btn">✏️ 編集</button>
+        </div>
+        <div id="memo-delete-confirm" class="memo-delete-confirm" hidden>
+          <p>このテーマのメモを削除します。元に戻せません。</p>
+          <div class="memo-delete-confirm-buttons">
+            <button type="button" id="memo-delete-cancel" class="mode-toggle-btn">やめる</button>
+            <button type="button" id="memo-delete-yes" class="mode-toggle-btn memo-delete-yes">削除する</button>
+          </div>
+        </div>
+        <div id="memo-editor" hidden>
+          <textarea id="memo-textarea" class="memo-textarea" maxlength="5000" rows="6" placeholder="このテーマのメモ(URLも書けます)" aria-label="メモ"></textarea>
+          <div class="memo-editor-footer">
+            <span id="memo-count"></span>
+            <button type="button" id="memo-done-btn" class="mode-toggle-btn">完了</button>
+          </div>
+        </div>
+        <p class="memo-status"><span id="memo-status"></span> <button type="button" id="memo-retry-btn" class="memo-retry-btn" hidden>再試行</button></p>
+      </div>
+    </section>
     <div id="buckets" class="buckets"></div>
     <div id="deck" class="deck"></div>
     <div id="lock-screen" class="lock-screen" hidden>
@@ -614,6 +669,36 @@
     if (hit.explanation_hits) parts.push(`解説${hit.explanation_hits}`);
     return parts.length ? 'ヒット: ' + parts.join('・') : '';
   }
+  // メモの文章を、「ふつうの文字」と「リンク」の並びに分ける。
+  // リンクにするのは、http:// か https:// で始まるURLだけ(javascript: などは、リンクにしない)。
+  // URLに使える文字は、半角の英数字と記号だけ。日本語の文章がURLのすぐ後ろに続いても、そこでURLは終わる
+  // (URLに日本語を含めたいときは、ブラウザからコピーした、%で書かれた形で貼る)。
+  // 文末の「.」「,」「)」などは、URLに含めない(ただし、(  )が対になっているURLは、そのまま)。
+  function splitMemoLinks(text) {
+    const source = String(text || '');
+    const parts = [];
+    const re = /https?:\/\/[A-Za-z0-9\-._~:\/?#\[\]@!$&'()*+,;=%]+/gi;
+    const count = (str, ch) => str.split(ch).length - 1;
+    let last = 0;
+    let m;
+    while ((m = re.exec(source)) !== null) {
+      let url = m[0];
+      for (;;) {
+        const c = url[url.length - 1];
+        if (/[.,;:!?'*]/.test(c)) url = url.slice(0, -1);
+        else if (c === ')' && count(url, '(') < count(url, ')')) url = url.slice(0, -1);
+        else if (c === ']' && count(url, '[') < count(url, ']')) url = url.slice(0, -1);
+        else break;
+      }
+      if (url.replace(/^https?:\/\//i, '') === '') { re.lastIndex = m.index + 1; continue; } // 「https://」だけは、リンクにしない
+      if (m.index > last) parts.push({ type: 'text', value: source.slice(last, m.index) });
+      parts.push({ type: 'link', value: url, href: url });
+      last = m.index + url.length;
+      re.lastIndex = last; // 削った末尾の文字は、ふつうの文字として、続きを探す
+    }
+    if (last < source.length) parts.push({ type: 'text', value: source.slice(last) });
+    return parts;
+  }
   // PURE-END
 
   // ── 3. 状態(メモリ上に持つ値) ──────────────────────
@@ -646,6 +731,19 @@
   let openBubbleQuestionId = null;   // 今、吹き出しを開いている、カードのquestion_id
   let bucketBarObserver = null;      // 固定バーを出すかの判定に使う、バケツ名の可視判定
   let bucketTitleVisible = {};       // バケツID → バケツ名(タイトル)が、画面内に完全に見えているか
+
+  // テーマごとのメモ
+  let memoThemeId = null;            // いま、メモを表示しているテーマ(null = メモを出していない)
+  let memoSaved = '';                // サーバーに保存されている(または、読み込んだ)内容
+  let memoValue = '';                // いまの内容(入力中のものを含む)
+  let memoOpen = false;              // メモ欄を開いているか(テーマを移っても、保つ)
+  let memoDeleting = false;          // 「削除しますか?」の確認を出しているか
+  let memoEditing = false;           // 編集中か(false = 閲覧。URLがリンクで出る)
+  let memoLoggedIn = false;
+  let memoQueuedValue = null;        // 保存を依頼済み(まだ完了していない場合を含む)の内容。同じ内容を、二重に保存しないため
+  let memoLoadFailed = false;        // 読み込みに失敗したとき、編集させない(空のまま上書きして、元のメモを消さないため)
+  let memoSaveTimer = null;
+  let memoSaveChain = Promise.resolve(); // 保存を、順番に1つずつ行うための鎖
 
   // 問題画面での「次へ・ランダム」の対象範囲(一覧画面での絞り込みを、テーマを開いたときに引き継ぐ)
   let activeThemeCategoryId = '';
@@ -1202,6 +1300,8 @@
   }
 
   async function showListView() {
+    flushMemo();
+    hideMemo();
     hideBucketBar();
     $('practice-view').hidden = true;
     $('list-view').hidden = false;
@@ -1245,7 +1345,9 @@
   // ── 6-1. テーマ(設問)の読み込み ──
   async function loadTheme(themeId) {
     currentThemeId = themeId;
-    // 通信を待つ間に前回の表示が一瞬残らないよう、真っ先にリセットする
+    // 前のテーマのメモは、保存してから切り替える(通信を待つ間に、前回の表示が一瞬残らないよう、真っ先にリセットする)
+    flushMemo();
+    hideMemo();
     hideBucketBar();
     currentBuckets = [];
     $('buckets').innerHTML = '';
@@ -1255,17 +1357,21 @@
     $('theme-bookmark-btn').textContent = '☆ このテーマをブックマーク';
     $('theme-bookmark-btn').classList.remove('active');
 
+    const user = await getCurrentUser(); // 一度確認していれば、すぐ返る
+
     // 必要な取得をできるだけまとめて並列で走らせる
     const [
       { data: theme, error: themeErr },
-      user,
       { data: buckets },
-      { data: questions }
+      { data: questions },
+      memoResult
     ] = await Promise.all([
       supabaseClient.from('themes').select('*, categories(is_free, name)').eq('id', themeId).single(),
-      getCurrentUser(),
       supabaseClient.from('buckets').select('*').eq('theme_id', themeId).order('sort_order'),
-      supabaseClient.from('questions').select('*').eq('theme_id', themeId)
+      supabaseClient.from('questions').select('*').eq('theme_id', themeId),
+      user
+        ? supabaseClient.from('user_theme_notes').select('body').eq('user_id', user.id).eq('theme_id', themeId).maybeSingle()
+        : Promise.resolve({ data: null, error: null })
     ]);
     // 待っている間に別のテーマへ切り替わっていたら、この結果は使わずに中断する
     if (themeId !== currentThemeId) return;
@@ -1289,6 +1395,7 @@
       return;
     }
     hideLockScreen();
+    showMemo(themeId, user, memoResult);
 
     if (isViewMode) {
       // 閲覧モード: シャッフルせず登録順で、最初から全問を仕分け済みとして表示する
@@ -1346,6 +1453,216 @@
       msgEl.textContent = '解除しました。反映しています…';
       if (currentThemeId) loadTheme(currentThemeId);
     }
+  }
+
+  // ── 6-1b. テーマごとのメモ ──
+  // 閲覧では、URLがリンクになって出る。「編集」で、テキスト欄に切り替わり、入力すると、自動で保存される。
+  // ログインしている人だけが、書ける(メモは、本人にだけ見える)。テーマを移る・一覧に戻る・画面を離れるときも、保存する。
+  function setMemoStatus(text, isError) {
+    $('memo-status').textContent = text;
+    $('memo-status').parentElement.classList.toggle('error', !!isError);
+    $('memo-retry-btn').hidden = !isError || memoLoadFailed;
+  }
+
+  function hideMemo() {
+    clearTimeout(memoSaveTimer);
+    memoThemeId = null;
+    memoEditing = false;
+    memoDeleting = false;
+    document.body.classList.remove('memo-editing');
+    $('memo').hidden = true;
+  }
+
+  function showMemo(themeId, user, result) {
+    memoThemeId = themeId;
+    memoLoggedIn = !!user;
+    memoLoadFailed = !!(result && result.error);
+    memoSaved = (result && result.data && result.data.body) || '';
+    memoValue = memoSaved;
+    memoQueuedValue = null;
+    memoEditing = false;
+    memoDeleting = false;
+    setMemoStatus('');
+    if (memoLoadFailed) console.error('メモ取得エラー:', result.error);
+    $('memo').hidden = false;
+    renderMemo();
+  }
+
+  // 閲覧の表示を、作り直す(URLを、リンクにする。文字は、textContentで入れるので、記号が入っても安全)
+  function renderMemoView() {
+    const view = $('memo-view');
+    view.innerHTML = '';
+    view.classList.toggle('empty', !memoValue);
+    if (!memoLoggedIn) {
+      view.textContent = 'ログインすると、このテーマのメモを残せます(自分にだけ見えます)。';
+      view.classList.add('empty');
+      return;
+    }
+    if (!memoValue) {
+      view.textContent = memoLoadFailed ? '' : 'まだメモはありません。';
+      return;
+    }
+    splitMemoLinks(memoValue).forEach(part => {
+      if (part.type === 'text') {
+        view.appendChild(document.createTextNode(part.value));
+      } else {
+        const a = makeEl('a', '', part.value);
+        a.href = part.href;
+        a.target = '_blank';
+        a.rel = 'noopener noreferrer';
+        view.appendChild(a);
+      }
+    });
+  }
+
+  function renderMemo() {
+    $('memo-toggle').setAttribute('aria-expanded', String(memoOpen));
+    $('memo-body').hidden = !memoOpen;
+    $('memo-badge').hidden = !memoValue.trim();
+    if (!memoOpen) return;
+
+    const canEdit = memoLoggedIn && !memoLoadFailed;
+    $('memo-view').hidden = memoEditing;
+    $('memo-view-actions').hidden = memoEditing || memoDeleting || !canEdit;
+    $('memo-delete-btn').hidden = !memoSaved;   // 削除できるのは、保存済みのメモがあるときだけ
+    $('memo-delete-confirm').hidden = !(memoDeleting && canEdit && !memoEditing);
+    $('memo-editor').hidden = !memoEditing;
+    $('memo-edit-btn').textContent = memoValue ? '✏️ 編集' : '✏️ メモを書く';
+    if (memoEditing) {
+      updateMemoCount();
+    } else {
+      renderMemoView();
+    }
+    if (memoLoadFailed) setMemoStatus('メモを読み込めませんでした。時間をおいて、このテーマを開き直してください。', true);
+  }
+
+  function updateMemoCount() {
+    $('memo-count').textContent = `${[...$('memo-textarea').value].length} / 5000`;
+  }
+
+  function startMemoEdit() {
+    if (!memoLoggedIn || memoLoadFailed) return;
+    memoEditing = true;
+    memoDeleting = false;
+    $('memo-textarea').value = memoValue;
+    renderMemo();
+    $('memo-textarea').focus();
+  }
+
+  function finishMemoEdit() {
+    memoValue = $('memo-textarea').value;
+    // 空のまま「完了」しても、保存済みの内容は消さない(消すときは、「削除」から)
+    if (!memoValue.trim()) memoValue = memoSaved;
+    memoEditing = false;
+    document.body.classList.remove('memo-editing');
+    saveMemoNow();
+    renderMemo();
+  }
+
+  // 保存する(入力が止まって少し待ってから)
+  function scheduleMemoSave() {
+    clearTimeout(memoSaveTimer);
+    memoSaveTimer = setTimeout(saveMemoNow, 800);
+  }
+
+  // すぐに保存する。保存は、鎖でつないで、順番に1つずつ行う(古い内容が、新しい内容を、上書きしないため)
+  // 入力が空(空白・改行だけを含む)のときは、自動では保存も削除もしない。削除は、deleteMemo() だけが行う
+  function saveMemoNow(allowDelete) {
+    clearTimeout(memoSaveTimer);
+    const themeId = memoThemeId;
+    const value = memoValue.trim() ? memoValue : '';
+    if (!value && allowDelete !== true) {
+      if (themeId && memoSaved && memoLoggedIn && !memoLoadFailed) setMemoStatus('空のままでは保存されません。保存済みの内容は残っています(消すときは「削除」)');
+      return memoSaveChain;
+    }
+    if (!themeId || !memoLoggedIn || memoLoadFailed || value === memoSaved || value === memoQueuedValue) return memoSaveChain;
+    memoQueuedValue = value;
+    memoSaveChain = memoSaveChain.then(() => persistMemo(themeId, value));
+    return memoSaveChain;
+  }
+
+  // 画面を離れる前などに呼ぶ。編集中の内容を、メモの変数に取り込んでから、保存する
+  function flushMemo() {
+    if (memoThemeId && memoEditing) memoValue = $('memo-textarea').value;
+    return saveMemoNow();
+  }
+
+  // 「削除する」を押したときだけ、保存済みのメモを消す
+  function deleteMemo() {
+    if (!memoThemeId || !memoLoggedIn || memoLoadFailed) return;
+    memoDeleting = false;
+    memoValue = '';
+    memoEditing = false;
+    renderMemo();
+    return saveMemoNow(true);
+  }
+
+  async function persistMemo(themeId, value) {
+    const user = await getCurrentUser();
+    if (!user) return;
+    const stillShown = () => themeId === memoThemeId;
+    if (stillShown()) setMemoStatus('保存中…');
+
+    let error;
+    if (!value.trim()) {
+      // 「削除する」を押したときだけ、行ごと消す(表に、空のメモを残さない)
+      ({ error } = await supabaseClient.from('user_theme_notes').delete().eq('user_id', user.id).eq('theme_id', themeId));
+    } else {
+      ({ error } = await supabaseClient.from('user_theme_notes').upsert(
+        { user_id: user.id, theme_id: themeId, body: value },
+        { onConflict: 'user_id,theme_id' }
+      ));
+    }
+    if (error) {
+      console.error('メモ保存エラー:', error);
+      if (memoQueuedValue === value) memoQueuedValue = null; // 失敗したので、もう一度、保存を依頼できるようにする
+      if (!value && stillShown()) {              // 削除に失敗したときは、メモは残っている。表示を元に戻す
+        memoValue = memoSaved;
+        renderMemo();
+        setMemoStatus('削除できませんでした。時間をおいて、もう一度お試しください', true);
+        $('memo-retry-btn').hidden = true;
+        return;
+      }
+      if (stillShown()) setMemoStatus('保存できませんでした(入力は、この画面に残っています)', true);
+      return;
+    }
+    if (stillShown()) {
+      memoSaved = value;
+      $('memo-badge').hidden = !value.trim();
+      setMemoStatus(value ? '保存しました' : '削除しました');
+      renderMemo();
+    }
+  }
+
+  function setupMemo() {
+    $('memo-toggle').addEventListener('click', () => {
+      memoOpen = !memoOpen;
+      renderMemo();
+      // 書いたことがないメモは、開いたら、そのまま書き始められるようにする
+      if (memoOpen && memoLoggedIn && !memoLoadFailed && !memoValue) startMemoEdit();
+      if (!memoOpen) flushMemo();
+    });
+    $('memo-edit-btn').addEventListener('click', startMemoEdit);
+    $('memo-delete-btn').addEventListener('click', () => { memoDeleting = true; renderMemo(); });
+    $('memo-delete-cancel').addEventListener('click', () => { memoDeleting = false; renderMemo(); });
+    $('memo-delete-yes').addEventListener('click', deleteMemo);
+    $('memo-view').addEventListener('click', e => {
+      if (!memoValue && !e.target.closest('a')) startMemoEdit(); // 空のメモは、欄そのものを押しても、書き始められる
+    });
+    $('memo-done-btn').addEventListener('click', finishMemoEdit);
+    $('memo-retry-btn').addEventListener('click', () => { if (!memoLoadFailed) flushMemo(); });
+    const ta = $('memo-textarea');
+    ta.addEventListener('input', () => {
+      memoValue = ta.value;
+      updateMemoCount();
+      setMemoStatus('');
+      scheduleMemoSave();
+    });
+    ta.addEventListener('focus', () => document.body.classList.add('memo-editing'));
+    ta.addEventListener('blur', () => { document.body.classList.remove('memo-editing'); flushMemo(); });
+    // 画面を閉じる・アプリを切り替えるときに、まだ保存していない内容を、保存する(できる範囲で)
+    document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') flushMemo(); });
+    window.addEventListener('pagehide', flushMemo);
   }
 
   // ── 6-2. 画面下の固定バー ──
@@ -1870,6 +2187,7 @@
   setupEventListeners();
   setupListFilters();
   setupSearch();
+  setupMemo();
   updateSortButtons();
   updateModeBadges();
   updateShuffleToggleButton();
