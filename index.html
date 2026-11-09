@@ -49,6 +49,10 @@
   }
   .filter-selectors { display: flex; gap: 10px; margin-bottom: 20px; }
   .filter-selectors select { flex: 1; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--border); background: var(--card-bg); font-size: 14px; }
+  .search-row { margin-bottom: 8px; }
+  .search-input { width: 100%; box-sizing: border-box; padding: 10px 12px; border-radius: 8px; border: 1px solid var(--border); background: var(--card-bg); color: var(--ink); font-size: 16px; font-family: inherit; }
+  .search-input:focus { outline: none; border-color: var(--primary-light); box-shadow: 0 0 0 2px var(--primary-light) inset; }
+  .search-status { font-size: 12px; color: var(--muted); margin: 0 0 12px; line-height: 1.6; white-space: pre-line; }
   .category-group { margin-bottom: 20px; }
   .category-heading { font-size: 13px; color: var(--muted); margin: 0 0 8px; font-weight: 600; }
   .theme-link {
@@ -67,6 +71,11 @@
   }
   @media (hover: hover) { .theme-link:hover { border-color: var(--primary-light); } }
   .theme-link-main { display: flex; align-items: center; gap: 8px; }
+  /* 検索でヒットしたテーマは、下に、ヒットの内訳を1行出す */
+  .theme-link.has-hit { flex-wrap: wrap; }
+  .theme-link.has-hit .theme-link-main { flex: 1 1 0; min-width: 0; }
+  .theme-link.has-hit .theme-link-right { flex: none; }
+  .theme-link-hit { flex-basis: 100%; margin-top: 6px; font-size: 11px; color: var(--muted); }
   .theme-link-star { cursor: pointer; color: #c9ccd1; font-size: 16px; line-height: 1; }
   .theme-link-star.active { color: #f2a93b; }
   .theme-link-lock { font-size: 13px; opacity: .6; }
@@ -381,6 +390,10 @@
 
   <div id="list-view">
     <div id="announcement" class="announcement" hidden></div>
+    <div class="search-row">
+      <input type="search" id="search-input" class="search-input" placeholder="テーマ・バケツ・カード・解説を検索(スペースで複数語)" autocomplete="off" autocapitalize="off" spellcheck="false" enterkeyhint="search" aria-label="検索">
+    </div>
+    <p id="search-status" class="search-status" hidden></p>
     <div class="filter-selectors">
       <select id="filter-category-select"></select>
     </div>
@@ -450,7 +463,8 @@
   <div id="bucket-bar-inner" class="bucket-bar-inner"></div>
 </div>
 
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<!-- バージョンを固定している(@2 のままだと、ライブラリの更新のたびに、予告なく挙動が変わりうる)。上げるときは、動作確認をしてから -->
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.119.0"></script>
 <script>
   // ============================================================
   // ヨコトキ  アプリ本体
@@ -583,6 +597,23 @@
     }
     return { question, isCorrect: false, incorrectMessage };
   }
+  // 検索欄の文字を、キーワードの配列にする。半角・全角のスペースで区切り、1文字の語は捨て、重複を除く。
+  // 1語あたり50文字まで、最大5語(DB側の search_themes と同じ上限)。
+  function parseSearchKeywords(text) {
+    const words = String(text || '').split(/[\s\u3000]+/)
+      .filter(w => [...w].length >= 2 && [...w].length <= 50);
+    return [...new Set(words)].slice(0, 5);
+  }
+
+  // ヒットの内訳を、一覧に出す1行の文にする(カードの答えとなるバケツ名は、出さない)
+  function formatSearchHit(hit) {
+    const parts = [];
+    if (hit.title_hit) parts.push('テーマ名');
+    if (hit.bucket_hits) parts.push(`バケツ${hit.bucket_hits}`);
+    if (hit.card_hits) parts.push(`カード${hit.card_hits}`);
+    if (hit.explanation_hits) parts.push(`解説${hit.explanation_hits}`);
+    return parts.length ? 'ヒット: ' + parts.join('・') : '';
+  }
   // PURE-END
 
   // ── 3. 状態(メモリ上に持つ値) ──────────────────────
@@ -596,6 +627,11 @@
   let currentListFilter = 'all';     // 'all' | 'bookmark'
   let sortMode = 'none';             // 'none' | 'accuracy'(正答率が低い順) | 'lastAnswered'(最終回答日が古い順) | 'attempts'(周回数が少ない順)
   let isPremiumUser = false;         // 有料テーマにロックアイコンを出すかの判定に使う
+  let searchHits = null;             // 検索の結果。null = 検索していない / Map(テーマID → ヒットの内訳)
+  let searchKeywords = [];           // いま表示している検索結果の、キーワード
+  let searchMessage = '';            // 検索中・失敗・入力のしかたの案内(結果が出ているときは、空)
+  let searchSeq = 0;                 // 検索のたびに増やす番号(遅れて届いた古い結果を、捨てるため)
+  let searchTimer = null;
 
   // 問題画面
   let currentThemeId = null;
@@ -614,6 +650,7 @@
   // 問題画面での「次へ・ランダム」の対象範囲(一覧画面での絞り込みを、テーマを開いたときに引き継ぐ)
   let activeThemeCategoryId = '';
   let activeThemeBookmarkOnly = false;
+  let activeThemeSearchIds = null;   // 検索でヒットしていたテーマのID(Set)。null = 検索していない
   let activeThemeSortMode = 'none';
 
   // 閲覧モード(最初から全カード仕分け済みの状態で表示。記録は保存しない)
@@ -835,14 +872,21 @@
     renderThemeList($('filter-category-select').value);
   }
 
-  function renderThemeList(categoryId) {
-    const el = $('theme-list');
-    el.innerHTML = '';
-    const filtered = themeSequence.filter(t => {
+  // 一覧に出すテーマ(カテゴリ・ブックマーク・検索の、絞り込みを、すべて満たすもの)
+  function getFilteredThemes(categoryId) {
+    return themeSequence.filter(t => {
       if (categoryId && t.category_id !== categoryId) return false;
+      if (searchHits && !searchHits.has(t.id)) return false;
       if (currentListFilter === 'bookmark') return t.isBookmarked;
       return true;
     });
+  }
+
+  function renderThemeList(categoryId) {
+    const el = $('theme-list');
+    el.innerHTML = '';
+    const filtered = getFilteredThemes(categoryId);
+    updateSearchStatus(filtered.length);
 
     if (!filtered.length) {
       el.innerHTML = '<p class="list-empty">該当するテーマが見つかりません</p>';
@@ -908,6 +952,7 @@
 
     const link = makeEl('a', 'theme-link');
     link.href = '#';
+    const hit = searchHits && searchHits.get(t.id);
 
     const main = makeEl('span', 'theme-link-main');
     const star = makeEl('span', 'theme-link-star' + (t.isBookmarked ? ' active' : ''), t.isBookmarked ? '★' : '☆');
@@ -922,6 +967,10 @@
     const right = makeEl('span', 'theme-link-right');
     right.append(makeEl('span', 'theme-link-accuracy', rightText), makeEl('span', 'theme-link-arrow', '→'));
     link.append(main, right);
+    if (hit) {
+      link.classList.add('has-hit');
+      link.appendChild(makeEl('span', 'theme-link-hit', formatSearchHit(hit)));
+    }
 
     star.addEventListener('click', e => {
       e.preventDefault();
@@ -933,6 +982,85 @@
       openTheme(t.id);
     });
     return link;
+  }
+
+  // ── 検索 ──
+  // 検索は「一覧の絞り込み」の1つ。カテゴリ・ブックマーク・並べ替えと、そのまま組み合わせられる。
+  // 実際の検索は、DBの関数 search_themes(migration-search.sql)が行う(権限もそちらで効く)。
+  function updateSearchStatus(visibleCount) {
+    const el = $('search-status');
+    let text = searchMessage;
+    if (!text && searchHits) {
+      text = `「${searchKeywords.join(' ')}」: ${visibleCount}件のテーマがヒット`;
+      // 未購入の人には、有料のカード・解説は、DBの権限で見えない(ヒットしないのは、そのため)
+      if (!isPremiumUser) text += '\n有料テーマのカード・解説の本文は、購入後に検索できます。';
+    }
+    el.textContent = text;
+    el.hidden = !text;
+  }
+
+  function clearSearch() {
+    searchSeq++;
+    searchHits = null;
+    searchKeywords = [];
+    searchMessage = '';
+    applyListFilter();
+  }
+
+  async function runSearch() {
+    const text = $('search-input').value;
+    if (!text.trim()) { clearSearch(); return; }
+
+    const seq = ++searchSeq;
+    const keywords = parseSearchKeywords(text);
+    if (!keywords.length) {
+      // 入力はあるが、検索できる語がない(1文字だけ、など)。一覧は、絞り込まない
+      searchHits = null;
+      searchMessage = '2文字以上のキーワードを入力してください';
+      applyListFilter();
+      return;
+    }
+
+    searchMessage = '検索中…';
+    updateSearchStatus(0);
+    const { data, error } = await supabaseClient.rpc('search_themes', { keywords });
+    if (seq !== searchSeq) return; // もっと新しい検索が始まっているので、この結果は捨てる
+
+    if (error) {
+      console.error('検索エラー:', error);
+      searchHits = null;
+      searchMessage = '検索に失敗しました。時間をおいて、もう一度お試しください';
+    } else {
+      searchHits = new Map((data || []).map(r => [r.theme_id, r]));
+      searchKeywords = keywords;
+      searchMessage = '';
+    }
+    applyListFilter();
+  }
+
+  function scheduleSearch() {
+    clearTimeout(searchTimer);
+    searchTimer = setTimeout(runSearch, 350);
+  }
+
+  function setupSearch() {
+    const input = $('search-input');
+    // 日本語の入力中(変換の途中)は、検索しない。確定したときに、検索する
+    input.addEventListener('input', e => { if (!e.isComposing) scheduleSearch(); });
+    input.addEventListener('compositionend', scheduleSearch);
+    input.addEventListener('keydown', e => {
+      if (e.isComposing) return;
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        clearTimeout(searchTimer);
+        runSearch();
+        input.blur(); // スマホのキーボードを閉じて、結果を見せる
+      } else if (e.key === 'Escape') {
+        input.value = '';
+        clearTimeout(searchTimer);
+        clearSearch();
+      }
+    });
   }
 
   // ログイン済みユーザーのみブックマークをSupabaseに永続化する
@@ -1065,9 +1193,10 @@
     $('practice-view').hidden = false;
     updateModeBadges();
     updateShuffleToggleButton();
-    // 一覧画面で絞り込んでいたカテゴリ・ブックマーク・並び順を、次へ・ランダムの対象範囲として引き継ぐ
+    // 一覧画面で絞り込んでいたカテゴリ・ブックマーク・検索・並び順を、次へ・ランダムの対象範囲として引き継ぐ
     activeThemeCategoryId = $('filter-category-select').value;
     activeThemeBookmarkOnly = currentListFilter === 'bookmark';
+    activeThemeSearchIds = searchHits ? new Set(searchHits.keys()) : null;
     activeThemeSortMode = sortMode;
     loadTheme(themeId);
   }
@@ -1081,11 +1210,12 @@
     applyListFilter();
   }
 
-  // 一覧画面での絞り込み(カテゴリ・ブックマーク)を、次へ・ランダムの対象範囲に適用する
+  // 一覧画面での絞り込み(カテゴリ・ブックマーク・検索)を、次へ・ランダムの対象範囲に適用する
   function getActiveThemePool() {
     const pool = themeSequence.filter(t => {
       if (activeThemeCategoryId && t.category_id !== activeThemeCategoryId) return false;
       if (activeThemeBookmarkOnly && !t.isBookmarked) return false;
+      if (activeThemeSearchIds && !activeThemeSearchIds.has(t.id)) return false;
       return true;
     });
     // 一覧画面と同じ基準で並べ替える
@@ -1606,6 +1736,7 @@
     if (!result) return;
     const { question, isCorrect, incorrectMessage } = result;
     const questionId = question.id; // 同じ文言のカードの入れ替えがあると、選んだカードとは別のID
+    const themeId = currentThemeId; // ログ保存を待つ間に、別のテーマへ移っても、解答したテーマで記録する
 
     if (isCorrect) {
       sortedIds.add(questionId);
@@ -1647,7 +1778,7 @@
     if (user) {
       const { error: logError } = await supabaseClient.from('user_answer_logs').insert({
         user_id: user.id,
-        theme_id: currentThemeId,
+        theme_id: themeId,
         question_id: questionId,
         selected_bucket_id: bucketId,
         is_correct: isCorrect
@@ -1738,6 +1869,7 @@
   $('lock-note-link').href = NOTE_ARTICLE_URL;
   setupEventListeners();
   setupListFilters();
+  setupSearch();
   updateSortButtons();
   updateModeBadges();
   updateShuffleToggleButton();
