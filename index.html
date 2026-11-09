@@ -484,7 +484,7 @@
           </div>
         </div>
         <div id="memo-editor" hidden>
-          <textarea id="memo-textarea" class="memo-textarea" maxlength="5000" rows="6" placeholder="このテーマのメモ(URLも書けます)" aria-label="メモ"></textarea>
+          <textarea id="memo-textarea" class="memo-textarea" maxlength="5000" rows="6" placeholder="学習用のメモを残すことができます" aria-label="メモ"></textarea>
           <div class="memo-editor-footer">
             <span id="memo-count"></span>
             <button type="button" id="memo-done-btn" class="mode-toggle-btn">完了</button>
@@ -667,6 +667,7 @@
     if (hit.bucket_hits) parts.push(`バケツ${hit.bucket_hits}`);
     if (hit.card_hits) parts.push(`カード${hit.card_hits}`);
     if (hit.explanation_hits) parts.push(`解説${hit.explanation_hits}`);
+    if (hit.memo_hit) parts.push('メモ');
     return parts.length ? 'ヒット: ' + parts.join('・') : '';
   }
   // メモの文章を、「ふつうの文字」と「リンク」の並びに分ける。
@@ -736,7 +737,7 @@
   let memoThemeId = null;            // いま、メモを表示しているテーマ(null = メモを出していない)
   let memoSaved = '';                // サーバーに保存されている(または、読み込んだ)内容
   let memoValue = '';                // いまの内容(入力中のものを含む)
-  let memoOpen = false;              // メモ欄を開いているか(テーマを移っても、保つ)
+  let memoOpen = false;              // メモ欄を開いているか(画面を移ると、閉じる)
   let memoDeleting = false;          // 「削除しますか?」の確認を出しているか
   let memoEditing = false;           // 編集中か(false = 閲覧。URLがリンクで出る)
   let memoLoggedIn = false;
@@ -1469,6 +1470,7 @@
     memoThemeId = null;
     memoEditing = false;
     memoDeleting = false;
+    memoOpen = false;                // 画面を移るたびに、メモは閉じた状態から始める
     document.body.classList.remove('memo-editing');
     $('memo').hidden = true;
   }
@@ -1494,7 +1496,7 @@
     view.innerHTML = '';
     view.classList.toggle('empty', !memoValue);
     if (!memoLoggedIn) {
-      view.textContent = 'ログインすると、このテーマのメモを残せます(自分にだけ見えます)。';
+      view.textContent = 'ログインすると自分専用の学習用のメモを残すことができます';
       view.classList.add('empty');
       return;
     }
