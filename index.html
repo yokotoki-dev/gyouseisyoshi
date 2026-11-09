@@ -15,8 +15,6 @@
     --review-bg: #eef1f6;
     --accent: #b23a2e;
     --accent-bg: #f7e9e6;
-    --correct: #1a7f5a;
-    --correct-bg: #e6f6ef;
     --incorrect: #b3441e;
     --incorrect-bg: #fbe9e2;
     --border: #ddd6c8;
@@ -39,7 +37,6 @@
     letter-spacing: .02em;
     margin: 0 0 4px;
   }
-  header p { color: var(--muted); font-size: 14px; margin: 0 0 20px; }
   .announcement {
     background: var(--notice-bg);
     color: var(--notice);
@@ -264,17 +261,6 @@
     white-space: pre-line;
   }
   .card.selected { border-color: var(--primary-light); box-shadow: 0 0 0 2px var(--primary-light) inset; }
-  .feedback {
-    padding: 14px 16px;
-    border-radius: 10px;
-    font-size: 14px;
-    line-height: 1.5;
-    margin-top: 16px;
-    white-space: pre-line;
-  }
-  .feedback.correct { background: var(--correct-bg); color: var(--correct); border: 1px solid var(--correct); }
-  .feedback.incorrect { background: var(--incorrect-bg); color: var(--incorrect); border: 1px solid var(--incorrect); }
-  .feedback.review { background: var(--review-bg); color: var(--primary); border: 1px solid var(--primary-light); }
   .lock-screen {
     background: var(--card-bg);
     border: 1px solid var(--border);
@@ -444,14 +430,13 @@
       <div class="lock-icon">🔒</div>
       <p class="lock-title">このテーマは有料会員限定です</p>
       <p class="lock-desc">note の記事を購入すると、解除コードが手に入ります</p>
-      <a class="lock-button" href="https://note.com/YOUR_ARTICLE_URL" target="_blank" rel="noopener">note で購入する</a>
+      <a class="lock-button" id="lock-note-link" target="_blank" rel="noopener">note で購入する</a>
       <div class="redeem-form">
         <input type="text" id="redeem-code-input" placeholder="解除コードを入力">
         <button id="redeem-code-btn">解除する</button>
       </div>
       <p id="redeem-message" class="redeem-message" hidden></p>
     </div>
-    <div id="feedback" class="feedback" hidden></div>
     <div class="next-theme-row">
       <button class="next-theme-btn random-theme-btn" id="random-theme-btn">🎲 ランダムなテーマへ</button>
       <button class="next-theme-btn" id="next-theme-btn">次のテーマへ →</button>
@@ -466,286 +451,42 @@
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script>
-  // ── 1. Supabase接続設定 ──────────────────────────────
+  // ============================================================
+  // ヨコトキ  アプリ本体
+  //   1. 設定・Supabase接続
+  //   2. 純粋なロジック(画面にも通信にも触れない。tests/unit.test.js で検査している)
+  //   3. 状態(メモリ上に持つ値)
+  //   4. ログイン
+  //   5. 一覧画面
+  //   6. 問題画面(読み込み / バケツ / 固定バー / カード / 吹き出し / 判定)
+  //   7. 起動
+  // ============================================================
+
+  // ── 1. 設定・Supabase接続 ───────────────────────────
   // Supabaseダッシュボード > Project Settings > API から取得して置き換える
   const SUPABASE_URL = 'https://alrieisjlvvmlsocnjxw.supabase.co';
   const SUPABASE_ANON_KEY = 'sb_publishable_YfXmxy7iZ_6B8mMRU2H39w_ky7HuS3N';
   const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
-  // ── 開発中の簡易ログイン(ログイン画面ができるまでの仮運用) ──
-  // Supabaseダッシュボード > Authentication > Users で自分用の
-  // テストアカウントを作成し、メール・パスワードを下に設定しておくと、
-  // 画面を作らずに「ログイン済み」の状態でブックマーク・履歴・
-  // 課金判定(entitlements)をそのままテストできる。
-  const DEV_TEST_EMAIL = ''; // 例: 'test@example.com'
-  const DEV_TEST_PASSWORD = ''; // 例: 'テスト用パスワード'
+  // 有料テーマのロック画面から飛ぶ、noteの記事のURL(公開前に、本物のURLへ置き換える)
+  const NOTE_ARTICLE_URL = 'https://note.com/YOUR_ARTICLE_URL';
+  // シャッフル設定を、ブラウザに覚えさせるときの名前
+  const SHUFFLE_STORAGE_KEY = 'yokotoki_shuffle_buckets';
 
-  async function devSignIn() {
-    if (!DEV_TEST_EMAIL || !DEV_TEST_PASSWORD) return;
-    const { data: { session } } = await supabaseClient.auth.getSession();
-    if (session) return; // 既にログイン済みならスキップ(2回目以降はセッションが残る)
-    const { error } = await supabaseClient.auth.signInWithPassword({
-      email: DEV_TEST_EMAIL,
-      password: DEV_TEST_PASSWORD,
-    });
-    if (error) console.error('開発用ログインに失敗しました:', error.message);
-  }
+  const $ = id => document.getElementById(id);
 
-  // ── お知らせ ─────────────────────────────────────
-  // is_active = trueの行があれば、画面上部に表示する。文言はTable Editorから編集する。
-  async function loadAnnouncement() {
-    const el = document.getElementById('announcement');
-    const { data, error } = await supabaseClient
-      .from('announcements')
-      .select('message')
-      .eq('is_active', true)
-      .order('created_at', { ascending: false })
-      .limit(1)
-      .maybeSingle();
-    if (error) {
-      console.error('お知らせ取得エラー:', error);
-      return;
+  // ── 2. 純粋なロジック ───────────────────────────────
+  // ここから PURE-END までは、画面(document)にも通信(supabase)にも触れない関数だけを置く。
+  // tests/unit.test.js が、この範囲を取り出して検査するので、目印の行は消さないこと。
+  // PURE-START
+
+  // Fisher-Yatesアルゴリズムで配列をシャッフルする(この配列自体を並べ替える)
+  function shuffleArray(array, random = Math.random) {
+    for (let i = array.length - 1; i > 0; i--) {
+      const j = Math.floor(random() * (i + 1));
+      [array[i], array[j]] = [array[j], array[i]];
     }
-    if (data) {
-      el.textContent = data.message;
-      el.hidden = false;
-    } else {
-      el.hidden = true;
-    }
-  }
-
-  // ── ログイン状態の表示・Googleログイン ──────────────
-  // Google OAuthを未設定の間は、ログインUI自体を非表示にしておく。
-  // Google Cloud ConsoleとSupabase側の設定が終わったらtrueへ切り替える。
-  const LOGIN_ENABLED = true;
-
-  function renderAuthArea(user) {
-    const el = document.getElementById('auth-area');
-    if (!LOGIN_ENABLED) {
-      el.hidden = true;
-      return;
-    }
-    el.hidden = false;
-    if (user) {
-      el.innerHTML = `<p class="auth-status">✓ ログイン中 <button class="auth-link-btn" id="logout-btn">ログアウト</button></p>`;
-      document.getElementById('logout-btn').addEventListener('click', async () => {
-        await supabaseClient.auth.signOut();
-      });
-    } else {
-      el.innerHTML = `
-        <button class="google-login-btn" id="google-login-btn">
-          <svg width="16" height="16" viewBox="0 0 48 48"><path fill="#EA4335" d="M24 9.5c3.5 0 6.6 1.2 9 3.6l6.7-6.7C35.9 2.4 30.4 0 24 0 14.6 0 6.5 5.4 2.5 13.2l7.8 6.1C12.2 13 17.6 9.5 24 9.5z"/><path fill="#4285F4" d="M46.5 24.5c0-1.6-.1-3.1-.4-4.5H24v9h12.7c-.5 3-2.2 5.4-4.7 7.1l7.4 5.7c4.3-4 6.8-9.9 6.8-17.3z"/><path fill="#FBBC05" d="M10.3 19.3A14.5 14.5 0 0 0 9.5 24c0 1.6.3 3.3.8 4.7l-7.8 6.1A24 24 0 0 1 0 24c0-3.9.9-7.6 2.5-10.8l7.8 6.1z"/><path fill="#34A853" d="M24 48c6.5 0 11.9-2.1 15.9-5.8l-7.4-5.7c-2.1 1.4-4.8 2.3-8.5 2.3-6.4 0-11.8-3.5-13.7-9.7l-7.8 6.1C6.5 42.6 14.6 48 24 48z"/></svg>
-          Googleでログイン
-        </button>
-      `;
-      document.getElementById('google-login-btn').addEventListener('click', async () => {
-        await supabaseClient.auth.signInWithOAuth({ provider: 'google' });
-      });
-    }
-  }
-
-  // ログイン・ログアウトのたびに、表示中のテーマと一覧の進捗を読み込み直す。
-  // ただし、Supabaseの仕様上、タブを非アクティブ→アクティブに戻しただけでも、
-  // 同じユーザーのまま、このコールバックが再度呼ばれることがある(トークンの、
-  // 自動確認のため)。その場合まで、テーマを読み込み直すと、タブを切り替えるたびに
-  // リロードされたように見えてしまうため、ユーザーIDが実際に変わったときだけ反応する。
-  let lastKnownUserId = undefined; // undefined = まだ一度も、確認していない
-  supabaseClient.auth.onAuthStateChange((_event, session) => {
-    // Googleログイン(OAuth)の直後、URLの#以降に、アクセストークンなどの
-    // 機密情報が、そのまま残ってしまう。これを、履歴に残さない形で、消しておく。
-    // (このトークンは、URLに書かれたまま、共有・ブックマークされる危険がある)
-    if (window.location.hash && window.location.hash.includes('access_token')) {
-      history.replaceState(null, '', window.location.pathname + window.location.search);
-    }
-
-    const userId = session?.user?.id || null;
-    renderAuthArea(session?.user || null);
-    if (userId === lastKnownUserId) return; // 前回と同じユーザーのままなら、何もしない
-    lastKnownUserId = userId;
-
-    if (currentThemeId) loadTheme(currentThemeId);
-    loadUserProgress().then(() => {
-      if (document.getElementById('list-view').hidden === false) applyListFilter();
-    });
-  });
-
-  // 表示中の問題データをメモリに保持(タップのたびに再取得しないため)
-  let currentQuestions = [];
-  let selectedQuestionId = null;
-  let selectedCardEl = null;
-  let selectedBucketId = null;
-  let selectedBucketEl = null;
-  let openBubbleQuestionId = null; // 今、吹き出しを開いている、カードのquestion_id(Vanilla JSで、直接管理する)
-  let sortedIds = new Set();
-  let bucketBarObserver = null; // 固定バーを出すかの判定に使う、バケツ名の可視判定
-  let bucketTitleVisible = {}; // バケツID → バケツ名(タイトル)が、画面内に完全に見えているか
-  let bucketBarHeight = 0; // 固定バーの高さ(px)
-  let currentThemeId = null;
-  let currentThemeShuffleAllowed = false; // 今のテーマが、DB側でシャッフルを許可されているか(themes.shuffle_buckets)
-  let currentListFilter = 'all'; // 'all' | 'bookmark'
-  let sortMode = 'none'; // 'none' | 'accuracy'(正答率が低い順) | 'lastAnswered'(最終回答日が古い順) | 'attempts'(周回数=回答回数÷カード枚数が少ない順)
-  let themeSequence = []; // 全カテゴリを横断した「カテゴリ順→テーマ順」の一覧(ブックマーク・履歴を含む)
-  let categoryList = []; // カテゴリのプルダウン用一覧
-  let isPremiumUser = false; // 一覧画面で、有料テーマにロックアイコンを表示するかの判定に使う
-  let isViewMode = false; // 閲覧モード(最初から全カード仕分け済みの状態で表示。記録は保存しない)
-  // バケツの位置をシャッフルするか。ユーザーが選んだ、設定は、
-  // アプリ全体で共通の、1つの設定として、ブラウザに覚えさせておく
-  let isShuffleEnabled = localStorage.getItem('yokotoki_shuffle_buckets') === 'true';
-  let activeThemeCategoryId = ''; // 問題画面での「次へ・ランダム」の対象範囲(カテゴリ)。空なら全カテゴリ横断
-  let activeThemeBookmarkOnly = false; // 問題画面での「次へ・ランダム」の対象範囲(ブックマークのみか)
-  let activeThemeSortMode = 'none'; // 問題画面での「次へ」の並び順('none' | 'accuracy' | 'lastAnswered' | 'attempts')
-
-  // ── 一覧画面: カテゴリ横断のテーマ一覧・絞り込み・画面遷移 ──
-  async function buildThemeSequence() {
-    const [
-      { data: categories, error: catErr },
-      { data: themes, error: themeErr },
-      { data: questionCounts, error: countErr }
-    ] = await Promise.all([
-      supabaseClient.from('categories').select('*').order('sort_order'),
-      supabaseClient.from('themes').select('*').order('sort_order'),
-      supabaseClient.from('theme_question_counts').select('theme_id, question_count')
-    ]);
-    if (catErr) console.error('categories取得エラー:', catErr);
-    if (themeErr) console.error('themes取得エラー:', themeErr);
-    // カード枚数のVIEWが未作成でも、並べ替え以外は動くようにする(周回数は回答回数で代用される)
-    if (countErr) console.warn('カード枚数の取得に失敗しました(回答回数で代用します):', countErr.message);
-    const questionCountById = {};
-    (questionCounts || []).forEach(r => { questionCountById[r.theme_id] = r.question_count; });
-    categoryList = categories || [];
-    themeSequence = [];
-    categoryList.forEach(c => {
-      (themes || [])
-        .filter(t => t.category_id === c.id)
-        .forEach(t => themeSequence.push({ ...t, categoryName: c.name, isFreeCategory: !!c.is_free, isBookmarked: false, accuracy: null, attemptCount: 0, questionCount: questionCountById[t.id] || 0 }));
-    });
-    await loadUserProgress();
-  }
-
-  // テーマ単位のブックマーク・正答率を取得して themeSequence に反映する
-  async function loadUserProgress() {
-    const { data: { user } } = await supabaseClient.auth.getUser();
-    if (!user) {
-      isPremiumUser = false;
-      // ログアウト時、前のユーザーの、進捗情報が、画面に残らないよう、明示的にリセットする
-      themeSequence.forEach(t => {
-        t.isBookmarked = false;
-        t.accuracy = null;
-        t.attemptCount = 0;
-        t.lastAnsweredAt = null;
-      });
-      return;
-    }
-    if (!themeSequence.length) return;
-
-    const [
-      { data: bookmarks, error: bookmarkErr },
-      { data: accuracyRows, error: accuracyErr },
-      { data: ent }
-    ] = await Promise.all([
-      supabaseClient.from('user_bookmarks').select('theme_id').eq('user_id', user.id),
-      supabaseClient.from('user_theme_accuracy').select('theme_id, total, correct, last_answered_at').eq('user_id', user.id),
-      supabaseClient.from('entitlements').select('is_premium').eq('user_id', user.id).maybeSingle()
-    ]);
-    if (bookmarkErr) console.error('ブックマーク取得エラー:', bookmarkErr);
-    if (accuracyErr) console.error('正答率取得エラー:', accuracyErr);
-    isPremiumUser = ent?.is_premium || false;
-
-    const bookmarkedThemeIds = new Set((bookmarks || []).map(b => b.theme_id));
-
-    const totalCounts = {};
-    const correctCounts = {};
-    const lastAnsweredAtById = {};
-    (accuracyRows || []).forEach(row => {
-      totalCounts[row.theme_id] = row.total;
-      correctCounts[row.theme_id] = row.correct;
-      lastAnsweredAtById[row.theme_id] = row.last_answered_at;
-    });
-
-    themeSequence.forEach(t => {
-      t.isBookmarked = bookmarkedThemeIds.has(t.id);
-      const total = totalCounts[t.id] || 0;
-      const correct = correctCounts[t.id] || 0;
-      t.attemptCount = total;
-      t.accuracy = total > 0 ? correct / total : null; // 未挑戦はnull
-      t.lastAnsweredAt = lastAnsweredAtById[t.id] || null; // 未挑戦はnull
-    });
-  }
-
-  async function initListView() {
-    await buildThemeSequence();
-    populateFilterSelectors();
-    renderThemeList('');
-  }
-
-  function populateFilterSelectors() {
-    const catSel = document.getElementById('filter-category-select');
-    catSel.innerHTML = '<option value="">すべてのカテゴリ</option>';
-    categoryList.forEach(c => {
-      const opt = document.createElement('option');
-      opt.value = c.id;
-      opt.textContent = c.name;
-      catSel.appendChild(opt);
-    });
-  }
-
-  function applyListFilter() {
-    const categoryId = document.getElementById('filter-category-select').value;
-    renderThemeList(categoryId);
-  }
-
-  function renderThemeList(categoryId) {
-    const el = document.getElementById('theme-list');
-    el.innerHTML = '';
-    const filtered = themeSequence.filter(t => {
-      if (categoryId && t.category_id !== categoryId) return false;
-      if (currentListFilter === 'bookmark') return t.isBookmarked;
-      return true;
-    });
-
-    if (!filtered.length) {
-      el.innerHTML = '<p class="list-empty">該当するテーマが見つかりません</p>';
-      return;
-    }
-
-    // 「すべてのカテゴリ」で、かつ並べ替え中は、カテゴリの区切りを取り払い、
-    // 横断的な1つの順番で表示する(「次へ」の挙動と一致させるため)
-    const isCrossCategorySort = !categoryId && sortMode !== 'none';
-
-    if (isCrossCategorySort) {
-      const sorted = filtered.slice().sort(getThemeComparator(sortMode));
-      sorted.forEach(t => el.appendChild(buildThemeLink(t)));
-      return;
-    }
-
-    const groups = [];
-    filtered.forEach(t => {
-      let group = groups.find(g => g.categoryName === t.categoryName);
-      if (!group) {
-        group = { categoryName: t.categoryName, themes: [] };
-        groups.push(group);
-      }
-      group.themes.push(t);
-    });
-
-    if (sortMode !== 'none') {
-      // カテゴリの区切りは保ったまま、各カテゴリの中だけ並べ替える(未挑戦は先頭)
-      groups.forEach(g => g.themes.sort(getThemeComparator(sortMode)));
-    }
-
-    groups.forEach(g => {
-      const section = document.createElement('div');
-      section.className = 'category-group';
-
-      const heading = document.createElement('h2');
-      heading.className = 'category-heading';
-      heading.textContent = g.categoryName;
-      section.appendChild(heading);
-
-      g.themes.forEach(t => section.appendChild(buildThemeLink(t)));
-
-      el.appendChild(section);
-    });
+    return array;
   }
 
   // 周回数 = 回答回数 ÷ カード枚数。カード枚数が不明(0)のときは、回答回数そのものを使う
@@ -788,11 +529,370 @@
     return `${yy}/${d.getMonth() + 1}/${d.getDate()}に回答`;
   }
 
-  function buildThemeLink(t) {
-    const link = document.createElement('a');
-    link.className = 'theme-link';
-    link.href = '#';
+  // 固定バーのボタンの列数(バケツ3つ以下はその数、6つまでは3列、7つ以上は4列)
+  function getBucketBarColumns(bucketCount) {
+    return bucketCount <= 3 ? bucketCount : bucketCount <= 6 ? 3 : 4;
+  }
 
+  // カードの文言の比較用(前後の空白は無視する)
+  function sameCardText(a, b) {
+    return a.card_text.trim() === b.card_text.trim();
+  }
+
+  // 「このカードを、このバケツに入れた」ときの正誤を判定する。
+  //   questions: そのテーマの全カード / sortedIds: 仕分け済みのカードIDのSet
+  // 戻り値: { question, isCorrect, incorrectMessage }。カードが見つからなければnull。
+  //   question: 実際に判定の対象になったカード(下記の入れ替えがあると、選んだカードとは別のカードになる)
+  //   incorrectMessage: 不正解のときに見せる文(正解のときはnull)
+  function judgeAnswer(questions, sortedIds, questionId, bucketId) {
+    let question = questions.find(q => q.id === questionId);
+    if (!question) return null;
+
+    // 同じ文言のカードが複数ある場合(例: 「有権者の50分の1」が議員の解職請求用と長の解職請求用で
+    // 2枚ある)、画面上は見分けがつかない。選んだカード自身が不正解でも、同じ文言で
+    // 「このバケツが正解」の未仕分けカードが残っていれば、そちらを使って判定する。
+    // (解説・解答ログも、実際に正解扱いにしたカードのものになる)
+    if (question.answer_bucket_id !== bucketId) {
+      const target = question;
+      const sameTextCard = questions.find(q =>
+        q.id !== target.id &&
+        !sortedIds.has(q.id) &&
+        sameCardText(q, target) &&
+        q.answer_bucket_id === bucketId
+      );
+      if (sameTextCard) question = sameTextCard;
+    }
+
+    if (question.answer_bucket_id === bucketId) {
+      return { question, isCorrect: true, incorrectMessage: null };
+    }
+
+    // 同じ文言のカードがこのテーマに2枚以上あるときは、どのカードをタップしたかで解説が
+    // 変わってしまうため、カード固有の解説ではなく、共通の文を表示する
+    const sameTextCards = questions.filter(q => q.id !== question.id && sameCardText(q, question));
+    // 同じ文言のカードが、すでにこのバケツに仕分け済みの場合(例: 2枚目を同じバケツに入れようとした)は、
+    // 「入りません」ではなく「すでに入っています」と伝える
+    const alreadyInBucket = sameTextCards.some(q => sortedIds.has(q.id) && q.answer_bucket_id === bucketId);
+
+    let incorrectMessage = question.explanation;
+    if (alreadyInBucket) {
+      incorrectMessage = `「${question.card_text.trim()}」は、すでにこのバケツに入っています。このカードは、別のバケツに入ります。`;
+    } else if (sameTextCards.length > 0) {
+      incorrectMessage = `「${question.card_text.trim()}」は、このバケツには入りません。`;
+    }
+    return { question, isCorrect: false, incorrectMessage };
+  }
+  // PURE-END
+
+  // ── 3. 状態(メモリ上に持つ値) ──────────────────────
+  // ログイン中のユーザー。undefined = まだ確認していない / null = 未ログイン
+  let currentUser = undefined;
+  let lastKnownUserId = undefined; // ログイン状態の変化の検出用(undefined = まだ一度も確認していない)
+
+  // 一覧画面
+  let themeSequence = [];            // 全カテゴリを横断した「カテゴリ順→テーマ順」の一覧(ブックマーク・履歴を含む)
+  let categoryList = [];             // カテゴリのプルダウン用一覧
+  let currentListFilter = 'all';     // 'all' | 'bookmark'
+  let sortMode = 'none';             // 'none' | 'accuracy'(正答率が低い順) | 'lastAnswered'(最終回答日が古い順) | 'attempts'(周回数が少ない順)
+  let isPremiumUser = false;         // 有料テーマにロックアイコンを出すかの判定に使う
+
+  // 問題画面
+  let currentThemeId = null;
+  let currentQuestions = [];         // 表示中のカード(タップのたびに再取得しないよう、メモリに保持)
+  let currentBuckets = [];           // 表示中のバケツ(登録順。シャッフルし直すときに、通信せずに使う)
+  let currentThemeShuffleAllowed = false; // 今のテーマが、DB側でシャッフルを許可されているか(themes.shuffle_buckets)
+  let sortedIds = new Set();         // 仕分け済みのカードID
+  let selectedQuestionId = null;
+  let selectedCardEl = null;
+  let selectedBucketId = null;
+  let selectedBucketEl = null;
+  let openBubbleQuestionId = null;   // 今、吹き出しを開いている、カードのquestion_id
+  let bucketBarObserver = null;      // 固定バーを出すかの判定に使う、バケツ名の可視判定
+  let bucketTitleVisible = {};       // バケツID → バケツ名(タイトル)が、画面内に完全に見えているか
+
+  // 問題画面での「次へ・ランダム」の対象範囲(一覧画面での絞り込みを、テーマを開いたときに引き継ぐ)
+  let activeThemeCategoryId = '';
+  let activeThemeBookmarkOnly = false;
+  let activeThemeSortMode = 'none';
+
+  // 閲覧モード(最初から全カード仕分け済みの状態で表示。記録は保存しない)
+  let isViewMode = false;
+  // バケツの位置をシャッフルするか。ユーザーが選んだ設定は、アプリ全体で共通の1つの設定として、ブラウザに覚えさせる
+  let isShuffleEnabled = localStorage.getItem(SHUFFLE_STORAGE_KEY) === 'true';
+
+  // ── 4. ログイン ─────────────────────────────────
+  // ログイン中のユーザーを返す。通信のたびに確認せず、一度確認した結果を使い回す
+  // (ログイン・ログアウトの変化は、下の onAuthStateChange が反映する)
+  async function getCurrentUser() {
+    if (currentUser === undefined) {
+      const { data: { session } } = await supabaseClient.auth.getSession();
+      if (currentUser === undefined) currentUser = session?.user || null;
+    }
+    return currentUser;
+  }
+
+  // 課金状態(entitlements)を確認して、isPremiumUserに反映する
+  async function fetchPremiumStatus(user) {
+    if (!user) {
+      isPremiumUser = false;
+      return false;
+    }
+    const { data } = await supabaseClient
+      .from('entitlements')
+      .select('is_premium')
+      .eq('user_id', user.id)
+      .maybeSingle();
+    isPremiumUser = data?.is_premium || false;
+    return isPremiumUser;
+  }
+
+  // Googleログイン(OAuth)の直後、URLの#以降に、アクセストークンなどの機密情報が、
+  // そのまま残ってしまう。これを、履歴に残さない形で消す(URLのまま共有・ブックマークされる危険があるため)
+  function clearAuthTokenFromUrl() {
+    if (window.location.hash && window.location.hash.includes('access_token')) {
+      history.replaceState(null, '', window.location.pathname + window.location.search);
+    }
+  }
+
+  function renderAuthArea(user) {
+    const el = $('auth-area');
+    if (user) {
+      el.innerHTML = `<p class="auth-status">✓ ログイン中 <button class="auth-link-btn" id="logout-btn">ログアウト</button></p>`;
+      $('logout-btn').addEventListener('click', async () => {
+        await supabaseClient.auth.signOut();
+      });
+    } else {
+      el.innerHTML = `
+        <button class="google-login-btn" id="google-login-btn">
+          <svg width="16" height="16" viewBox="0 0 48 48"><path fill="#EA4335" d="M24 9.5c3.5 0 6.6 1.2 9 3.6l6.7-6.7C35.9 2.4 30.4 0 24 0 14.6 0 6.5 5.4 2.5 13.2l7.8 6.1C12.2 13 17.6 9.5 24 9.5z"/><path fill="#4285F4" d="M46.5 24.5c0-1.6-.1-3.1-.4-4.5H24v9h12.7c-.5 3-2.2 5.4-4.7 7.1l7.4 5.7c4.3-4 6.8-9.9 6.8-17.3z"/><path fill="#FBBC05" d="M10.3 19.3A14.5 14.5 0 0 0 9.5 24c0 1.6.3 3.3.8 4.7l-7.8 6.1A24 24 0 0 1 0 24c0-3.9.9-7.6 2.5-10.8l7.8 6.1z"/><path fill="#34A853" d="M24 48c6.5 0 11.9-2.1 15.9-5.8l-7.4-5.7c-2.1 1.4-4.8 2.3-8.5 2.3-6.4 0-11.8-3.5-13.7-9.7l-7.8 6.1C6.5 42.6 14.6 48 24 48z"/></svg>
+          Googleでログイン
+        </button>
+      `;
+      $('google-login-btn').addEventListener('click', async () => {
+        await supabaseClient.auth.signInWithOAuth({ provider: 'google' });
+      });
+    }
+  }
+
+  // ログイン・ログアウトのたびに、表示中のテーマと一覧の進捗を読み込み直す。
+  // ただし、Supabaseの仕様上、タブを非アクティブ→アクティブに戻しただけでも、
+  // 同じユーザーのまま、このコールバックが再度呼ばれることがある(トークンの自動確認のため)。
+  // その場合まで、テーマを読み込み直すと、タブを切り替えるたびにリロードされたように見えてしまうため、
+  // ユーザーIDが実際に変わったときだけ反応する。
+  supabaseClient.auth.onAuthStateChange((_event, session) => {
+    clearAuthTokenFromUrl();
+
+    currentUser = session?.user || null;
+    renderAuthArea(currentUser);
+    const userId = currentUser?.id || null;
+    if (userId === lastKnownUserId) return; // 前回と同じユーザーのままなら、何もしない
+    lastKnownUserId = userId;
+
+    if (currentThemeId) loadTheme(currentThemeId);
+    loadUserProgress().then(() => {
+      if ($('list-view').hidden === false) applyListFilter();
+    });
+  });
+
+  // onAuthStateChangeの中だけでチェックすると、イベントの発火と、URLへのハッシュの反映に、
+  // タイミングのズレ(レースコンディション)があり、見逃すことが、Supabase側でも報告されている。
+  // そのため、独立して、短い間隔で繰り返し確認する(Supabaseがトークンを読み取り終えるまでの猶予も、これで確保できる)
+  function startAuthTokenCleanup() {
+    let attempts = 0;
+    const timer = setInterval(() => {
+      attempts++;
+      clearAuthTokenFromUrl();
+      if (attempts >= 20) clearInterval(timer); // 最大10秒間(500ms×20回)だけ確認する
+    }, 500);
+  }
+
+  // ── 5. 一覧画面 ──────────────────────────────────
+  // お知らせ: is_active = trueの行があれば、画面上部に表示する。文言はTable Editorから編集する。
+  async function loadAnnouncement() {
+    const el = $('announcement');
+    const { data, error } = await supabaseClient
+      .from('announcements')
+      .select('message')
+      .eq('is_active', true)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (error) {
+      console.error('お知らせ取得エラー:', error);
+      return;
+    }
+    if (data) {
+      el.textContent = data.message;
+      el.hidden = false;
+    } else {
+      el.hidden = true;
+    }
+  }
+
+  async function buildThemeSequence() {
+    const [
+      { data: categories, error: catErr },
+      { data: themes, error: themeErr },
+      { data: questionCounts, error: countErr }
+    ] = await Promise.all([
+      supabaseClient.from('categories').select('*').order('sort_order'),
+      supabaseClient.from('themes').select('*').order('sort_order'),
+      supabaseClient.from('theme_question_counts').select('theme_id, question_count')
+    ]);
+    if (catErr) console.error('categories取得エラー:', catErr);
+    if (themeErr) console.error('themes取得エラー:', themeErr);
+    // カード枚数のVIEWが未作成でも、並べ替え以外は動くようにする(周回数は回答回数で代用される)
+    if (countErr) console.warn('カード枚数の取得に失敗しました(回答回数で代用します):', countErr.message);
+    const questionCountById = {};
+    (questionCounts || []).forEach(r => { questionCountById[r.theme_id] = r.question_count; });
+    categoryList = categories || [];
+    themeSequence = [];
+    categoryList.forEach(c => {
+      (themes || [])
+        .filter(t => t.category_id === c.id)
+        .forEach(t => themeSequence.push({
+          ...t,
+          categoryName: c.name,
+          isFreeCategory: !!c.is_free,
+          isBookmarked: false,
+          accuracy: null,
+          attemptCount: 0,
+          lastAnsweredAt: null,
+          questionCount: questionCountById[t.id] || 0
+        }));
+    });
+    await loadUserProgress();
+  }
+
+  // テーマ単位のブックマーク・正答率・課金状態を取得して themeSequence に反映する
+  async function loadUserProgress() {
+    const user = await getCurrentUser();
+    if (!user) {
+      isPremiumUser = false;
+      // ログアウト時、前のユーザーの進捗情報が画面に残らないよう、明示的にリセットする
+      themeSequence.forEach(t => {
+        t.isBookmarked = false;
+        t.accuracy = null;
+        t.attemptCount = 0;
+        t.lastAnsweredAt = null;
+      });
+      return;
+    }
+    if (!themeSequence.length) return;
+
+    const [
+      { data: bookmarks, error: bookmarkErr },
+      { data: accuracyRows, error: accuracyErr }
+    ] = await Promise.all([
+      supabaseClient.from('user_bookmarks').select('theme_id').eq('user_id', user.id),
+      supabaseClient.from('user_theme_accuracy').select('theme_id, total, correct, last_answered_at').eq('user_id', user.id),
+      fetchPremiumStatus(user)
+    ]);
+    if (bookmarkErr) console.error('ブックマーク取得エラー:', bookmarkErr);
+    if (accuracyErr) console.error('正答率取得エラー:', accuracyErr);
+
+    const bookmarkedThemeIds = new Set((bookmarks || []).map(b => b.theme_id));
+    const statsById = {};
+    (accuracyRows || []).forEach(row => { statsById[row.theme_id] = row; });
+
+    themeSequence.forEach(t => {
+      const stats = statsById[t.id];
+      const total = stats?.total || 0;
+      const correct = stats?.correct || 0;
+      t.isBookmarked = bookmarkedThemeIds.has(t.id);
+      t.attemptCount = total;
+      t.accuracy = total > 0 ? correct / total : null; // 未挑戦はnull
+      t.lastAnsweredAt = stats?.last_answered_at || null; // 未挑戦はnull
+    });
+  }
+
+  async function ensureThemeSequence() {
+    if (!themeSequence.length) await buildThemeSequence();
+    return themeSequence.length > 0;
+  }
+
+  async function initListView() {
+    await buildThemeSequence();
+    populateFilterSelectors();
+    renderThemeList('');
+  }
+
+  function populateFilterSelectors() {
+    const catSel = $('filter-category-select');
+    catSel.innerHTML = '<option value="">すべてのカテゴリ</option>';
+    categoryList.forEach(c => {
+      const opt = document.createElement('option');
+      opt.value = c.id;
+      opt.textContent = c.name;
+      catSel.appendChild(opt);
+    });
+  }
+
+  function applyListFilter() {
+    renderThemeList($('filter-category-select').value);
+  }
+
+  function renderThemeList(categoryId) {
+    const el = $('theme-list');
+    el.innerHTML = '';
+    const filtered = themeSequence.filter(t => {
+      if (categoryId && t.category_id !== categoryId) return false;
+      if (currentListFilter === 'bookmark') return t.isBookmarked;
+      return true;
+    });
+
+    if (!filtered.length) {
+      el.innerHTML = '<p class="list-empty">該当するテーマが見つかりません</p>';
+      return;
+    }
+
+    // 「すべてのカテゴリ」で、かつ並べ替え中は、カテゴリの区切りを取り払い、
+    // 横断的な1つの順番で表示する(「次へ」の挙動と一致させるため)
+    const isCrossCategorySort = !categoryId && sortMode !== 'none';
+
+    if (isCrossCategorySort) {
+      filtered.slice().sort(getThemeComparator(sortMode)).forEach(t => el.appendChild(buildThemeLink(t)));
+      return;
+    }
+
+    const groups = [];
+    filtered.forEach(t => {
+      let group = groups.find(g => g.categoryName === t.categoryName);
+      if (!group) {
+        group = { categoryName: t.categoryName, themes: [] };
+        groups.push(group);
+      }
+      group.themes.push(t);
+    });
+
+    if (sortMode !== 'none') {
+      // カテゴリの区切りは保ったまま、各カテゴリの中だけ並べ替える(未挑戦は先頭)
+      groups.forEach(g => g.themes.sort(getThemeComparator(sortMode)));
+    }
+
+    groups.forEach(g => {
+      const section = document.createElement('div');
+      section.className = 'category-group';
+
+      const heading = document.createElement('h2');
+      heading.className = 'category-heading';
+      heading.textContent = g.categoryName;
+      section.appendChild(heading);
+
+      g.themes.forEach(t => section.appendChild(buildThemeLink(t)));
+      el.appendChild(section);
+    });
+  }
+
+  // 要素を作って、クラスと文字(textContent)を入れる。名前などに記号が入っても、そのまま表示される
+  function makeEl(tag, className, text) {
+    const el = document.createElement(tag);
+    if (className) el.className = className;
+    if (text !== undefined) el.textContent = text;
+    return el;
+  }
+
+  function buildThemeLink(t) {
     let rightText;
     if (sortMode === 'lastAnswered') {
       rightText = formatLastAnsweredAt(t.lastAnsweredAt);
@@ -803,38 +903,38 @@
       rightText = t.accuracy === null ? '未挑戦' : `正答率 ${Math.round(t.accuracy * 100)}%`;
     }
 
+    const link = makeEl('a', 'theme-link');
+    link.href = '#';
+
+    const main = makeEl('span', 'theme-link-main');
+    const star = makeEl('span', 'theme-link-star' + (t.isBookmarked ? ' active' : ''), t.isBookmarked ? '★' : '☆');
+    main.append(star, makeEl('span', '', t.title));
     // 有料カテゴリのテーマで、まだ購入していないユーザーには、鍵アイコンを表示する
-    const isLocked = !t.isFreeCategory && !isPremiumUser;
+    if (!t.isFreeCategory && !isPremiumUser) {
+      const lock = makeEl('span', 'theme-link-lock', '🔒');
+      lock.title = '有料テーマ';
+      main.appendChild(lock);
+    }
 
-    link.innerHTML = `
-      <span class="theme-link-main">
-        <span class="theme-link-star ${t.isBookmarked ? 'active' : ''}">${t.isBookmarked ? '★' : '☆'}</span>
-        <span>${t.title}</span>
-        ${isLocked ? '<span class="theme-link-lock" title="有料テーマ">🔒</span>' : ''}
-      </span>
-      <span class="theme-link-right">
-        <span class="theme-link-accuracy">${rightText}</span>
-        <span class="theme-link-arrow">→</span>
-      </span>
-    `;
+    const right = makeEl('span', 'theme-link-right');
+    right.append(makeEl('span', 'theme-link-accuracy', rightText), makeEl('span', 'theme-link-arrow', '→'));
+    link.append(main, right);
 
-    link.querySelector('.theme-link-star').addEventListener('click', e => {
+    star.addEventListener('click', e => {
       e.preventDefault();
       e.stopPropagation();
       toggleThemeBookmark(t);
     });
-
     link.addEventListener('click', e => {
       e.preventDefault();
       openTheme(t.id);
     });
-
     return link;
   }
 
   // ログイン済みユーザーのみブックマークをSupabaseに永続化する
   async function toggleThemeBookmark(theme) {
-    const { data: { user } } = await supabaseClient.auth.getUser();
+    const user = await getCurrentUser();
     if (!user) return; // 未ログイン時は何もしない(今後ログイン導線を追加)
 
     theme.isBookmarked = !theme.isBookmarked;
@@ -846,10 +946,10 @@
     applyListFilter();
   }
 
-  // 仕分け画面上部のブックマークボタンの表示・トグル
+  // 問題画面上部のブックマークボタンの表示
   function updateBookmarkButton() {
     const theme = themeSequence.find(t => t.id === currentThemeId);
-    const btn = document.getElementById('theme-bookmark-btn');
+    const btn = $('theme-bookmark-btn');
     if (!theme) return;
     btn.textContent = theme.isBookmarked ? '★ ブックマーク済み' : '☆ このテーマをブックマーク';
     btn.classList.toggle('active', theme.isBookmarked);
@@ -864,7 +964,7 @@
 
   // このテーマの解答履歴(正答率のもと)を丸ごと削除する。元に戻せないため確認を挟む
   async function resetThemeProgress() {
-    const { data: { user } } = await supabaseClient.auth.getUser();
+    const user = await getCurrentUser();
     if (!user) {
       alert('ログインしていないため、リセットする記録がありません。');
       return;
@@ -881,18 +981,36 @@
     if (theme) {
       theme.accuracy = null;
       theme.attemptCount = 0;
+      theme.lastAnsweredAt = null;
     }
 
-    // 今の画面上の状態(バケツに置いたカードなど)も合わせてリセットする
-    sortedIds = new Set();
-    clearCardSelection();
-    clearBucketSelection();
-    closeExplanationBubble();
-    document.querySelectorAll('.bucket-cards').forEach(el => { el.innerHTML = ''; });
-    document.getElementById('feedback').hidden = true;
-    renderDeck();
+    // 今の画面上の状態(バケツに置いたカードなど)も合わせてリセットする。
+    // 閲覧モードは、最初から全カードが仕分け済みの表示で、リセットする画面上の状態がないので、そのまま
+    if (!isViewMode) {
+      sortedIds = new Set();
+      clearCardSelection();
+      clearBucketSelection();
+      closeExplanationBubble();
+      document.querySelectorAll('.bucket-cards').forEach(el => { el.innerHTML = ''; });
+      renderDeck();
+    }
 
     alert('リセットしました。');
+  }
+
+  // 並べ替えボタン(押すと、そのモードに切り替わり、もう一度押すと、テーマ順に戻る)
+  const SORT_BUTTONS = [
+    { id: 'sort-toggle-btn',    mode: 'accuracy',     label: '正答率が低い順に並べ替え' },
+    { id: 'sort-by-date-btn',   mode: 'lastAnswered', label: '最終回答日が古い順に並べ替え' },
+    { id: 'sort-by-count-btn',  mode: 'attempts',     label: '回答回数が少ない順に並べ替え' }
+  ];
+
+  function updateSortButtons() {
+    SORT_BUTTONS.forEach(({ id, mode, label }) => {
+      const btn = $(id);
+      btn.classList.toggle('active', sortMode === mode);
+      btn.textContent = sortMode === mode ? 'テーマ順に戻す' : label;
+    });
   }
 
   function setupListFilters() {
@@ -905,76 +1023,56 @@
       });
     });
 
-    const sortBtn = document.getElementById('sort-toggle-btn');
-    const sortByDateBtn = document.getElementById('sort-by-date-btn');
-    const sortByCountBtn = document.getElementById('sort-by-count-btn');
-
-    function updateSortButtons() {
-      sortBtn.classList.toggle('active', sortMode === 'accuracy');
-      sortBtn.textContent = sortMode === 'accuracy' ? 'テーマ順に戻す' : '正答率が低い順に並べ替え';
-      sortByDateBtn.classList.toggle('active', sortMode === 'lastAnswered');
-      sortByDateBtn.textContent = sortMode === 'lastAnswered' ? 'テーマ順に戻す' : '最終回答日が古い順に並べ替え';
-      sortByCountBtn.classList.toggle('active', sortMode === 'attempts');
-      sortByCountBtn.textContent = sortMode === 'attempts' ? 'テーマ順に戻す' : '回答回数が少ない順に並べ替え';
-    }
-
-    sortBtn.addEventListener('click', () => {
-      sortMode = sortMode === 'accuracy' ? 'none' : 'accuracy';
-      updateSortButtons();
-      applyListFilter();
-    });
-    sortByDateBtn.addEventListener('click', () => {
-      sortMode = sortMode === 'lastAnswered' ? 'none' : 'lastAnswered';
-      updateSortButtons();
-      applyListFilter();
-    });
-    sortByCountBtn.addEventListener('click', () => {
-      sortMode = sortMode === 'attempts' ? 'none' : 'attempts';
-      updateSortButtons();
-      applyListFilter();
+    SORT_BUTTONS.forEach(({ id, mode }) => {
+      $(id).addEventListener('click', () => {
+        sortMode = sortMode === mode ? 'none' : mode;
+        updateSortButtons();
+        applyListFilter();
+      });
     });
   }
 
+  // 閲覧/仕分けのバッジ。一覧画面側のバッジは「次にテーマを開くときの初期モード」を表す
+  function updateModeBadges() {
+    ['mode-badge', 'list-mode-badge'].forEach(id => {
+      const badge = $(id);
+      badge.textContent = isViewMode ? '👁 閲覧中' : '✏️ 仕分け中';
+      badge.classList.toggle('view', isViewMode);
+    });
+  }
+
+  // シャッフルの、オン・オフに応じて、ボタンの見た目を更新する(一覧画面と問題画面の、両方)
+  function updateShuffleToggleButton() {
+    const label = isShuffleEnabled ? '🔀 バケツシャッフルON' : '🔀 バケツシャッフルOFF';
+    ['shuffle-toggle-btn', 'list-shuffle-toggle-btn'].forEach(id => {
+      const btn = $(id);
+      btn.textContent = label;
+      btn.classList.toggle('active', isShuffleEnabled);
+    });
+  }
+
+  function toggleShuffleSetting() {
+    isShuffleEnabled = !isShuffleEnabled;
+    localStorage.setItem(SHUFFLE_STORAGE_KEY, String(isShuffleEnabled));
+    updateShuffleToggleButton();
+  }
+
   function openTheme(themeId) {
-    document.getElementById('list-view').hidden = true;
-    document.getElementById('practice-view').hidden = false;
-    updateModeToggleButton();
+    $('list-view').hidden = true;
+    $('practice-view').hidden = false;
+    updateModeBadges();
     updateShuffleToggleButton();
     // 一覧画面で絞り込んでいたカテゴリ・ブックマーク・並び順を、次へ・ランダムの対象範囲として引き継ぐ
-    activeThemeCategoryId = document.getElementById('filter-category-select').value;
+    activeThemeCategoryId = $('filter-category-select').value;
     activeThemeBookmarkOnly = currentListFilter === 'bookmark';
     activeThemeSortMode = sortMode;
     loadTheme(themeId);
   }
 
-  function updateModeToggleButton() {
-    const badge = document.getElementById('mode-badge');
-    badge.textContent = isViewMode ? '👁 閲覧中' : '✏️ 仕分け中';
-    badge.classList.toggle('view', isViewMode);
-  }
-
-  // シャッフルの、オン・オフに応じて、ボタンの見た目を更新する
-  function updateShuffleToggleButton() {
-    const label = isShuffleEnabled ? '🔀 バケツシャッフルON' : '🔀 バケツシャッフルOFF';
-    const btn = document.getElementById('shuffle-toggle-btn');
-    btn.textContent = label;
-    btn.classList.toggle('active', isShuffleEnabled);
-    const listBtn = document.getElementById('list-shuffle-toggle-btn');
-    listBtn.textContent = label;
-    listBtn.classList.toggle('active', isShuffleEnabled);
-  }
-
-  // 一覧画面側のバッジは「次にテーマを開くときの初期モード」を表す
-  function updateListModeToggleButton() {
-    const badge = document.getElementById('list-mode-badge');
-    badge.textContent = isViewMode ? '👁 閲覧中' : '✏️ 仕分け中';
-    badge.classList.toggle('view', isViewMode);
-  }
-
   async function showListView() {
     hideBucketBar();
-    document.getElementById('practice-view').hidden = true;
-    document.getElementById('list-view').hidden = false;
+    $('practice-view').hidden = true;
+    $('list-view').hidden = false;
     // 問題画面で解答した内容(正答率・ブックマーク)を一覧に反映し直す
     await loadUserProgress();
     applyListFilter();
@@ -992,53 +1090,47 @@
     return pool;
   }
 
-  // ── 「次のテーマへ」進む機能(一覧画面での絞り込みを引き継いだ範囲内だけを回る) ──
+  // 「次のテーマへ」進む(一覧画面での絞り込みを引き継いだ範囲内だけを回る)
   async function goToNextTheme() {
-    if (!themeSequence.length) await buildThemeSequence();
-    if (!themeSequence.length) return;
+    if (!await ensureThemeSequence()) return;
     const pool = getActiveThemePool();
     if (!pool.length) return;
     const currentIndex = pool.findIndex(t => t.id === currentThemeId);
-    const next = pool[(currentIndex + 1) % pool.length];
-    loadTheme(next.id);
+    loadTheme(pool[(currentIndex + 1) % pool.length].id);
   }
 
   // 直前と同じテーマは避けつつ、無作為に1つ選ぶ(こちらも絞り込みの範囲内で行う)
   async function goToRandomTheme() {
-    if (!themeSequence.length) await buildThemeSequence();
-    if (!themeSequence.length) return;
-
+    if (!await ensureThemeSequence()) return;
     const pool = getActiveThemePool();
     if (!pool.length) return;
-    const candidates = pool.length > 1
-      ? pool.filter(t => t.id !== currentThemeId)
-      : pool;
-    const next = candidates[Math.floor(Math.random() * candidates.length)];
-    loadTheme(next.id);
+    const candidates = pool.length > 1 ? pool.filter(t => t.id !== currentThemeId) : pool;
+    loadTheme(candidates[Math.floor(Math.random() * candidates.length)].id);
   }
 
-  // ── 2. テーマ(設問)の読み込み ─────────────────────────
+  // ── 6. 問題画面 ──────────────────────────────────
+  // ── 6-1. テーマ(設問)の読み込み ──
   async function loadTheme(themeId) {
     currentThemeId = themeId;
     // 通信を待つ間に前回の表示が一瞬残らないよう、真っ先にリセットする
-    document.getElementById('feedback').hidden = true;
     hideBucketBar();
-    document.getElementById('buckets').innerHTML = '';
-    document.getElementById('deck').innerHTML = '';
-    document.getElementById('theme-instruction').textContent = '読み込み中...';
-    document.getElementById('theme-breadcrumb').textContent = '';
-    document.getElementById('theme-bookmark-btn').textContent = '☆ このテーマをブックマーク';
-    document.getElementById('theme-bookmark-btn').classList.remove('active');
+    currentBuckets = [];
+    $('buckets').innerHTML = '';
+    $('deck').innerHTML = '';
+    $('theme-instruction').textContent = '読み込み中...';
+    $('theme-breadcrumb').textContent = '';
+    $('theme-bookmark-btn').textContent = '☆ このテーマをブックマーク';
+    $('theme-bookmark-btn').classList.remove('active');
 
     // 必要な取得をできるだけまとめて並列で走らせる
     const [
       { data: theme, error: themeErr },
-      { data: { user } },
+      user,
       { data: buckets },
       { data: questions }
     ] = await Promise.all([
       supabaseClient.from('themes').select('*, categories(is_free, name)').eq('id', themeId).single(),
-      supabaseClient.auth.getUser(),
+      getCurrentUser(),
       supabaseClient.from('buckets').select('*').eq('theme_id', themeId).order('sort_order'),
       supabaseClient.from('questions').select('*').eq('theme_id', themeId)
     ]);
@@ -1046,28 +1138,17 @@
     if (themeId !== currentThemeId) return;
     if (themeErr) return console.error(themeErr);
 
-    // ログイン済みなら課金状態(entitlements)も確認する(user.idが分かってから)
-    let isPremium = false;
-    if (user) {
-      const { data: ent } = await supabaseClient
-        .from('entitlements')
-        .select('is_premium')
-        .eq('user_id', user.id)
-        .maybeSingle();
-      isPremium = ent?.is_premium || false;
-    }
+    // 解除コードを入れた直後にも呼ばれるので、課金状態は、ここで確認し直す
+    const isPremium = await fetchPremiumStatus(user);
     if (themeId !== currentThemeId) return;
 
     const isFreeCategory = theme.categories?.is_free || false;
     const locked = !isFreeCategory && !isPremium;
 
     // ここまでで必要なデータが全部揃ったので、まとめて画面を更新する
-    document.getElementById('theme-instruction').textContent = theme.instruction;
-    document.getElementById('theme-breadcrumb').textContent = `${theme.categories?.name || ''} › ${theme.title}`;
+    $('theme-instruction').textContent = theme.instruction;
+    $('theme-breadcrumb').textContent = `${theme.categories?.name || ''} › ${theme.title}`;
     updateBookmarkButton();
-
-    // シャッフルの、オン・オフは、テーマごとではなく、アプリ全体で共通の設定として扱う
-    // (isShuffleEnabledは、localStorageから復元済みの値を、そのまま使う)
     updateShuffleToggleButton();
 
     if (locked) {
@@ -1094,33 +1175,47 @@
     // 両方が、trueのときだけ。これにより、条文並べ替えのようなテーマでは、
     // ユーザーが、どう選んでも、位置が固定されたまま、安全に保たれる。
     currentThemeShuffleAllowed = !!theme.shuffle_buckets;
-    renderBuckets(buckets || [], isShuffleEnabled && currentThemeShuffleAllowed);
+    currentBuckets = buckets || [];
+    renderBuckets();
     renderDeck();
-  }
-
-  // Fisher-Yatesアルゴリズムで配列をシャッフルする(この配列自体を並べ替える)
-  function shuffleArray(array) {
-    for (let i = array.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [array[i], array[j]] = [array[j], array[i]];
-    }
-    return array;
   }
 
   // ロック画面と学習画面の出し分け
   function showLockScreen() {
     hideBucketBar();
-    document.getElementById('buckets').hidden = true;
-    document.getElementById('deck').hidden = true;
-    document.getElementById('lock-screen').hidden = false;
+    $('buckets').hidden = true;
+    $('deck').hidden = true;
+    $('lock-screen').hidden = false;
   }
   function hideLockScreen() {
-    document.getElementById('buckets').hidden = false;
-    document.getElementById('deck').hidden = false;
-    document.getElementById('lock-screen').hidden = true;
+    $('buckets').hidden = false;
+    $('deck').hidden = false;
+    $('lock-screen').hidden = true;
   }
 
-  // ── 画面下の固定バー ────────────────────────────────
+  // 解除コードの確認
+  async function redeemCode() {
+    const code = $('redeem-code-input').value.trim();
+    const msgEl = $('redeem-message');
+    if (!code) return;
+
+    const user = await getCurrentUser();
+    msgEl.hidden = false;
+    if (!user) {
+      msgEl.textContent = '先にログインしてください。';
+      return;
+    }
+
+    const { data, error } = await supabaseClient.functions.invoke('redeem-code', { body: { code } });
+    if (error || data?.error) {
+      msgEl.textContent = 'コードが正しくないか、エラーが発生しました。';
+    } else {
+      msgEl.textContent = '解除しました。反映しています…';
+      if (currentThemeId) loadTheme(currentThemeId);
+    }
+  }
+
+  // ── 6-2. 画面下の固定バー ──
   // カードが多く、下までスクロールすると、バケツの名前が画面から外れる。
   // 「バケツ名が、1つでも、画面内に完全に見えていない」間だけ、バケツ名のボタンを並べたバーを出す。
   // バーのボタンは、バケツ本体を押したときと、まったく同じ動き(activateBucket)になる。
@@ -1132,7 +1227,7 @@
   }
   // 今、バーが画面に出ているなら、その高さ。出ていなければ0
   function bucketBarVisibleHeight() {
-    const bar = document.getElementById('bucket-bar');
+    const bar = $('bucket-bar');
     return (!bar.hidden && bar.classList.contains('show')) ? bar.offsetHeight : 0;
   }
   // 要素が、画面の中(バーに隠れない範囲)に、収まって見えているか
@@ -1145,7 +1240,7 @@
   function hideBucketBar() {
     if (bucketBarObserver) { bucketBarObserver.disconnect(); bucketBarObserver = null; }
     bucketTitleVisible = {};
-    const bar = document.getElementById('bucket-bar');
+    const bar = $('bucket-bar');
     bar.classList.remove('show');
     bar.querySelectorAll('.explanation-bubble-wrap').forEach(el => el.remove());
     bar.hidden = true;
@@ -1155,24 +1250,18 @@
   function renderBucketBar(orderedBuckets) {
     // 閲覧モードでは、仕分けをしないので、バーは出さない
     if (isViewMode || !orderedBuckets.length) { hideBucketBar(); return; }
-    const bar = document.getElementById('bucket-bar');
-    const inner = document.getElementById('bucket-bar-inner');
+    const inner = $('bucket-bar-inner');
     inner.innerHTML = '';
-    const n = orderedBuckets.length;
-    inner.style.gridTemplateColumns = `repeat(${n <= 3 ? n : n <= 6 ? 3 : 4}, 1fr)`;
+    inner.style.gridTemplateColumns = `repeat(${getBucketBarColumns(orderedBuckets.length)}, 1fr)`;
     orderedBuckets.forEach(bucket => {
-      const btn = document.createElement('button');
+      const btn = makeEl('button', 'bucket-bar-chip');
       btn.type = 'button';
-      btn.className = 'bucket-bar-chip';
       btn.dataset.bucketId = bucket.id;
       btn.dataset.title = bucket.title;
-      const span = document.createElement('span');
-      span.className = 'bucket-bar-chip-title';
-      span.textContent = bucket.title; // textContentで入れるので、名前に記号が入っても安全
-      btn.appendChild(span);
+      btn.appendChild(makeEl('span', 'bucket-bar-chip-title', bucket.title));
       inner.appendChild(btn);
     });
-    bar.hidden = false;
+    $('bucket-bar').hidden = false;
     document.body.classList.add('has-bucket-bar');
     syncBucketBarSelection();
     setupBucketBarObserver();
@@ -1183,10 +1272,10 @@
   // バーが消えて、またちらつく、ということが起きないようにするため)
   function setupBucketBarObserver() {
     if (bucketBarObserver) bucketBarObserver.disconnect();
-    const bar = document.getElementById('bucket-bar');
+    const bar = $('bucket-bar');
     if (bar.hidden) return;
-    bucketBarHeight = bar.offsetHeight;
-    document.documentElement.style.setProperty('--bucket-bar-h', bucketBarHeight + 'px');
+    const barHeight = bar.offsetHeight;
+    document.documentElement.style.setProperty('--bucket-bar-h', barHeight + 'px');
     bucketTitleVisible = {};
     document.querySelectorAll('#buckets .bucket').forEach(b => { bucketTitleVisible[b.dataset.bucketId] = false; });
     bucketBarObserver = new IntersectionObserver(entries => {
@@ -1195,21 +1284,18 @@
         bucketTitleVisible[id] = e.intersectionRatio >= 0.95;
       });
       updateBucketBar();
-    }, { rootMargin: `0px 0px -${bucketBarHeight}px 0px`, threshold: [0, 0.95, 1] });
+    }, { rootMargin: `0px 0px -${barHeight}px 0px`, threshold: [0, 0.95, 1] });
     document.querySelectorAll('#buckets .bucket .bucket-title').forEach(t => bucketBarObserver.observe(t));
   }
 
   function updateBucketBar() {
-    const bar = document.getElementById('bucket-bar');
+    const bar = $('bucket-bar');
     if (bar.hidden) return;
     const ids = Object.keys(bucketTitleVisible);
     const show = ids.length > 0 && ids.some(id => !bucketTitleVisible[id]);
     bar.classList.toggle('show', show);
-    if (!show) {
-      // バーが引っ込んだら、バーから出していた解説の吹き出しも、一緒に閉じる(出し元がなくなるため)
-      const wraps = bar.querySelectorAll('.explanation-bubble-wrap');
-      if (wraps.length) closeExplanationBubble();
-    }
+    // バーが引っ込んだら、バーから出していた解説の吹き出しも、一緒に閉じる(出し元がなくなるため)
+    if (!show && bar.querySelector('.explanation-bubble-wrap')) closeExplanationBubble();
   }
 
   function syncBucketBarSelection() {
@@ -1218,9 +1304,10 @@
     });
   }
 
+  // ── 6-3. バケツ ──
   // バケツを押したときの共通の動き(バケツ本体・バーのボタンの、どちらから押しても同じ)
   function activateBucket(bucketId) {
-    // すでにカードを選択中なら、バケツを選んだ瞬間に判定する(カード→バケツの順、従来通り)
+    // すでにカードを選択中なら、バケツを選んだ瞬間に判定する(カード→バケツの順)
     if (selectedQuestionId) {
       const questionId = selectedQuestionId;
       clearCardSelection();
@@ -1244,32 +1331,54 @@
     syncBucketBarSelection();
   }
 
-  // ── 3. バケツの描画(タップ/ドロップの両方を受け付ける) ───
-  function renderBuckets(buckets, shuffleBuckets) {
-    const el = document.getElementById('buckets');
+  function clearCardSelection() {
+    if (selectedCardEl) selectedCardEl.classList.remove('selected');
+    selectedQuestionId = null;
+    selectedCardEl = null;
+  }
+
+  function clearBucketSelection() {
+    if (selectedBucketEl) selectedBucketEl.classList.remove('selected');
+    selectedBucketId = null;
+    selectedBucketEl = null;
+    syncBucketBarSelection();
+  }
+
+  // 仕分け済みのカード(バケツの中に並ぶカード)を作る。タップすれば、いつでも解説を見返せる
+  function createSortedCard(question) {
+    const chip = makeEl('div', 'card sorted', question.card_text);
+    chip.addEventListener('click', e => {
+      e.stopPropagation();
+      showCardExplanation(chip, question.id, question.explanation);
+    });
+    return chip;
+  }
+
+  // currentBuckets を、今の設定(シャッフルの有無・閲覧モード)で描画する
+  function renderBuckets() {
+    const shuffle = isShuffleEnabled && currentThemeShuffleAllowed;
+    const orderedBuckets = shuffle ? shuffleArray(currentBuckets.slice()) : currentBuckets;
+    const el = $('buckets');
     el.innerHTML = '';
-    const orderedBuckets = shuffleBuckets ? shuffleArray(buckets.slice()) : buckets;
+
     orderedBuckets.forEach(bucket => {
-      const div = document.createElement('div');
-      div.className = 'bucket';
+      const div = makeEl('div', 'bucket');
       div.dataset.bucketId = bucket.id;
 
-      if (isViewMode) {
-        // 閲覧モード: バケツの見出し(分類名)を隠し、タップで表示させる
-        div.innerHTML = `<h3 class="bucket-title masked" data-title="${bucket.title}">タップで表示</h3><div class="bucket-cards"></div>`;
-      } else {
-        div.innerHTML = `<h3 class="bucket-title">${bucket.title}</h3><div class="bucket-cards"></div>`;
-      }
+      // 閲覧モード: バケツの見出し(分類名)を隠し、タップで表示させる
+      const title = makeEl('h3', 'bucket-title' + (isViewMode ? ' masked' : ''), isViewMode ? 'タップで表示' : bucket.title);
+      if (isViewMode) title.dataset.title = bucket.title;
+      div.append(title, makeEl('div', 'bucket-cards'));
 
       // タップで仕分け(カード選択済みの場合)、バケツを先に選ぶ操作、または閲覧モードでの見出し表示切り替え
       div.addEventListener('click', e => {
-        const titleEl = div.querySelector('.bucket-title');
-        if (isViewMode && titleEl.classList.contains('masked') && e.target === titleEl) {
-          titleEl.classList.remove('masked');
-          titleEl.textContent = titleEl.dataset.title;
+        if (isViewMode) {
+          if (title.classList.contains('masked') && e.target === title) {
+            title.classList.remove('masked');
+            title.textContent = title.dataset.title;
+          }
           return;
         }
-        if (isViewMode) return;
         activateBucket(bucket.id);
       });
 
@@ -1279,58 +1388,35 @@
       div.addEventListener('drop', e => {
         e.preventDefault();
         div.classList.remove('drag-over');
-        const questionId = e.dataTransfer.getData('text/plain');
-        handleAnswer(questionId, bucket.id);
+        handleAnswer(e.dataTransfer.getData('text/plain'), bucket.id);
       });
 
       el.appendChild(div);
     });
 
-    // 閲覧モード: 描画直後に、全問題を正解のバケツへ最初から差し込んでおく
-    if (isViewMode) {
-      currentQuestions.forEach(q => {
-        const bucketCardsEl = document.querySelector(`.bucket[data-bucket-id="${q.answer_bucket_id}"] .bucket-cards`);
-        if (!bucketCardsEl) return;
-        const chip = document.createElement('div');
-        chip.className = 'card sorted';
-        chip.textContent = q.card_text;
-        chip.addEventListener('click', e => {
-          e.stopPropagation();
-          showCardExplanation(chip, q.id, q.explanation);
-        });
-        bucketCardsEl.appendChild(chip);
-      });
-    } else {
-      // 仕分けモード: バケツの位置を、シャッフルし直した際などに、
-      // すでに正解済みのカードが、消えないよう、あらためて差し込み直す
-      currentQuestions.filter(q => sortedIds.has(q.id)).forEach(q => {
-        const bucketCardsEl = document.querySelector(`.bucket[data-bucket-id="${q.answer_bucket_id}"] .bucket-cards`);
-        if (!bucketCardsEl) return;
-        const chip = document.createElement('div');
-        chip.className = 'card sorted';
-        chip.textContent = q.card_text;
-        chip.addEventListener('click', e => {
-          e.stopPropagation();
-          showCardExplanation(chip, q.id, q.explanation);
-        });
-        bucketCardsEl.appendChild(chip);
-      });
-    }
+    // 仕分け済みのカードを差し込む。閲覧モードでは全カード、仕分けモードでは、
+    // バケツの位置をシャッフルし直した際などに、すでに正解済みのカードが消えないよう、あらためて差し込み直す
+    currentQuestions.filter(q => sortedIds.has(q.id)).forEach(q => {
+      const bucketCardsEl = bucketCardsElById(q.answer_bucket_id);
+      if (bucketCardsEl) bucketCardsEl.appendChild(createSortedCard(q));
+    });
 
     // 画面下の固定バーも、同じ並びで作り直す(シャッフル後の並びも反映される)
     renderBucketBar(orderedBuckets);
   }
 
-  // ── 4. 問題カードの描画 ──────────────────────────────
+  function bucketCardsElById(bucketId) {
+    return document.querySelector(`.bucket[data-bucket-id="${bucketId}"] .bucket-cards`);
+  }
+
+  // ── 6-4. カード ──
   function renderDeck() {
-    const el = document.getElementById('deck');
+    const el = $('deck');
     el.innerHTML = '';
     currentQuestions
       .filter(q => !sortedIds.has(q.id))
       .forEach(q => {
-        const card = document.createElement('div');
-        card.className = 'card';
-        card.textContent = q.card_text;
+        const card = makeEl('div', 'card', q.card_text);
         card.draggable = true;
         card.dataset.questionId = q.id;
 
@@ -1365,23 +1451,17 @@
     cardEl.classList.add('selected');
   }
 
-  function clearCardSelection() {
-    if (selectedCardEl) selectedCardEl.classList.remove('selected');
-    selectedQuestionId = null;
-    selectedCardEl = null;
-  }
-
-  function clearBucketSelection() {
-    if (selectedBucketEl) selectedBucketEl.classList.remove('selected');
-    selectedBucketId = null;
-    selectedBucketEl = null;
-    syncBucketBarSelection();
+  // ── 6-5. 解説の吹き出し ──
+  function buildBubble(text, isIncorrect) {
+    const wrap = makeEl('div', 'explanation-bubble-wrap' + (isIncorrect ? ' incorrect' : ''));
+    const bubble = makeEl('div', 'explanation-bubble' + (isIncorrect ? ' incorrect' : ''), text);
+    wrap.appendChild(bubble);
+    return { wrap, bubble };
   }
 
   // 仕分け済みチップをタップしたときの共通処理。
   // 「今、どのquestion_idの吹き出しが開いているか」は、openBubbleQuestionIdという、
-  // 1つの変数だけで、一元管理する(以前、Alpine.storeを使っていたが、頻繁なDOM操作との
-  // 相性が悪く、ページのリロードを引き起こすことが分かったため、Vanilla JSに戻した)。
+  // 1つの変数だけで一元管理する。
   // keepBucketSelected: trueの場合、バケツの選択(連続投入のための状態)は解除しない。
   // 「②バケツ→カード」の流れで、正解した、まさにその瞬間に使う。
   // barAnchorEl: 指定すると、吹き出しを、そのバーのボタンから上向きに出す
@@ -1389,7 +1469,6 @@
   function showCardExplanation(chipEl, questionId, explanation, keepBucketSelected, barAnchorEl) {
     clearCardSelection();
     if (!keepBucketSelected) clearBucketSelection();
-    document.getElementById('feedback').hidden = true; // 以前の正解時に出た、画面下の解説を隠す
 
     const wasOpen = openBubbleQuestionId === questionId;
 
@@ -1404,19 +1483,15 @@
 
     chipEl.classList.add('highlighted');
 
-    const wrap = document.createElement('div');
-    wrap.className = 'explanation-bubble-wrap';
-    const bubble = document.createElement('div');
-    bubble.className = 'explanation-bubble';
-    bubble.textContent = explanation;
-    wrap.appendChild(bubble);
+    const { wrap, bubble } = buildBubble(explanation, false);
     if (barAnchorEl) {
-      // バーの中に置き、バーのボタンの真上に、位置を合わせる(バーを基準にするので、スマホの画面の高さの変化にも強い)
-      const bar = document.getElementById('bucket-bar');
+      // バーの中に置く。横位置は、そのボタンの真上、縦位置は「バー全体の上端」に合わせる。
+      // (下の段のボタンの真上に置くと、上の段のボタンを覆って押せなくなるため)
+      const bar = $('bucket-bar');
       const barRect = bar.getBoundingClientRect();
       const btnRect = barAnchorEl.getBoundingClientRect();
       wrap.style.left = (btnRect.left + btnRect.width / 2 - barRect.left) + 'px';
-      wrap.style.bottom = (barRect.bottom - btnRect.top + 12) + 'px';
+      wrap.style.bottom = (barRect.height + 12) + 'px';
       bar.appendChild(wrap);
     } else {
       chipEl.appendChild(wrap);
@@ -1431,20 +1506,20 @@
   // 不正解のとき、選んだ、そのカード自身の近くに、吹き出しで解説を表示する(赤系の配色)
   function showIncorrectExplanation(targetEl, explanation) {
     closeExplanationBubble();
-    document.getElementById('feedback').hidden = true;
-
-    const wrap = document.createElement('div');
-    wrap.className = 'explanation-bubble-wrap incorrect';
-    const bubble = document.createElement('div');
-    bubble.className = 'explanation-bubble incorrect';
-    bubble.textContent = explanation;
-    wrap.appendChild(bubble);
+    const { wrap, bubble } = buildBubble(explanation, true);
     targetEl.appendChild(wrap);
 
     requestAnimationFrame(() => {
       wrap.classList.add('show');
       adjustBubblePosition(wrap, bubble);
     });
+  }
+
+  // 吹き出し・強調表示を、DOM要素ごと、確実に消す
+  function closeExplanationBubble() {
+    document.querySelectorAll('.explanation-bubble-wrap').forEach(el => el.remove());
+    document.querySelectorAll('.card.sorted.highlighted').forEach(el => el.classList.remove('highlighted'));
+    openBubbleQuestionId = null;
   }
 
   // 吹き出しが、画面の左右・上端からはみ出さないよう、表示後に位置・高さを調整する
@@ -1489,7 +1564,7 @@
     }
   }
 
-  // ── 5. 正誤判定・フィードバック・ログ保存 ────────────────
+  // ── 6-6. 正誤判定・フィードバック・ログ保存 ──
   // 不正解のとき、選んだバケツを赤く光らせて揺らし、「✕ 違います」を短く表示する。
   // カードが画面の下にあって、バケツ側からは何も見えない場合でも、間違えたことに気づけるようにするため
   function flashWrongBucket(bucketId) {
@@ -1515,9 +1590,7 @@
     bucketEl.querySelectorAll('.bucket-wrong-label').forEach(el => el.remove());
     void bucketEl.offsetWidth; // 連続で間違えたときも、アニメーションを最初から再生するため
     bucketEl.classList.add('wrong-flash');
-    const label = document.createElement('div');
-    label.className = 'bucket-wrong-label';
-    label.textContent = '✕ 違います';
+    const label = makeEl('div', 'bucket-wrong-label', '✕ 違います');
     bucketEl.appendChild(label);
     bucketEl._wrongTimer = setTimeout(() => {
       bucketEl.classList.remove('wrong-flash');
@@ -1525,100 +1598,49 @@
     }, 1200);
   }
 
-  async function handleAnswer(questionId, bucketId) {
-    let question = currentQuestions.find(q => q.id === questionId);
-    if (!question) return;
-
-    // 同じ文言のカードが複数ある場合(例: 「有権者の50分の1」が議員の解職請求用と長の解職請求用で
-    // 2枚ある)、画面上は見分けがつかない。選んだカード自身が不正解でも、同じ文言で
-    // 「このバケツが正解」の未仕分けカードが残っていれば、そちらを使って判定する。
-    // (解説・解答ログも、実際に正解扱いにしたカードのものになる)
-    if (question.answer_bucket_id !== bucketId) {
-      const sameTextCard = currentQuestions.find(q =>
-        q.id !== question.id &&
-        !sortedIds.has(q.id) &&
-        q.card_text.trim() === question.card_text.trim() &&
-        q.answer_bucket_id === bucketId
-      );
-      if (sameTextCard) {
-        question = sameTextCard;
-        questionId = sameTextCard.id;
-      }
-    }
-
-    const isCorrect = question.answer_bucket_id === bucketId;
+  async function handleAnswer(selectedId, bucketId) {
+    const result = judgeAnswer(currentQuestions, sortedIds, selectedId, bucketId);
+    if (!result) return;
+    const { question, isCorrect, incorrectMessage } = result;
+    const questionId = question.id; // 同じ文言のカードの入れ替えがあると、選んだカードとは別のID
 
     if (isCorrect) {
       sortedIds.add(questionId);
-      const bucketCardsEl = document.querySelector(`.bucket[data-bucket-id="${bucketId}"] .bucket-cards`);
+      const bucketCardsEl = bucketCardsElById(bucketId);
       if (bucketCardsEl) {
-        const chip = document.createElement('div');
-        chip.className = 'card sorted';
-        chip.textContent = question.card_text;
-        // 仕分け済みのカードも、タップすればいつでも解説を見返せるようにする
-        chip.addEventListener('click', e => {
-          e.stopPropagation();
-          showCardExplanation(chip, questionId, question.explanation);
-        });
+        const chip = createSortedCard(question);
         bucketCardsEl.appendChild(chip);
-        // 正解した、まさにその瞬間も、吹き出しで解説を表示する(画面下の解説エリアは使わない)。
-        // 「②バケツ→カード」で、連続してカードを入れている最中は、バケツの選択を維持したままにする
+        // 正解した、まさにその瞬間も、吹き出しで解説を表示する。
+        // 「②バケツ→カード」で、連続してカードを入れている最中は、バケツの選択を維持したままにする。
         // ただし、入ったカードが画面の外にあり、固定バーが出ているときは、バーのそのバケツのボタンから出す
         // (そうしないと、解説が、画面の外に出て、読めない)
         const barBtn = getBucketBarChip(bucketId);
         const useBar = !!barBtn && bucketBarVisibleHeight() > 0 && !isVisibleAboveBar(chip);
         showCardExplanation(chip, questionId, question.explanation, selectedBucketId === bucketId, useBar ? barBtn : null);
       }
-    } else {
-      // 不正解の場合、カードはデッキに残ったままだが、renderDeck()で作り直されるため、
-      // 吹き出しの表示自体は、renderDeck()の後に、あらためて行う
+      // (バケツの選択は解除しない。続けて同じバケツに他のカードを入れられるようにするため)
+      clearCardSelection();
     }
 
     // 通信を待たず、画面の更新はここで即座に行う
-    // (バケツの選択は解除しない。続けて同じバケツに他のカードを入れられるようにするため)
-    if (isCorrect) {
-      selectedQuestionId = null;
-      selectedCardEl = null;
-    }
     renderDeck();
 
     if (!isCorrect) {
       flashWrongBucket(bucketId);
-
-      // 同じ文言のカードがこのテーマに2枚以上あるときは、どのカードをタップしたかで解説が
-      // 変わってしまうため、カード固有の解説ではなく、共通の文を表示する
-      const hasSameTextCards = currentQuestions.some(q =>
-        q.id !== question.id && q.card_text.trim() === question.card_text.trim()
-      );
-      // 同じ文言のカードが、すでにこのバケツに仕分け済みの場合(例: 2枚目を同じバケツに入れようとした)は、
-      // 「入りません」ではなく「すでに入っています」と伝える
-      const alreadyInBucket = hasSameTextCards && currentQuestions.some(q =>
-        q.id !== question.id &&
-        sortedIds.has(q.id) &&
-        q.card_text.trim() === question.card_text.trim() &&
-        q.answer_bucket_id === bucketId
-      );
-      let incorrectMessage = question.explanation;
-      if (alreadyInBucket) {
-        incorrectMessage = `「${question.card_text.trim()}」は、すでにこのバケツに入っています。このカードは、別のバケツに入ります。`;
-      } else if (hasSameTextCards) {
-        incorrectMessage = `「${question.card_text.trim()}」は、このバケツには入りません。`;
-      }
-
+      // 不正解の場合、カードはデッキに残るが、renderDeck()で作り直されるため、
+      // 吹き出しの表示は、renderDeck()の後に、あらためて行う
       const cardEl = document.querySelector(`.card[data-question-id="${questionId}"]`);
       if (cardEl) {
-        // 不正解の場合、まだ正しい判断ができていないため、カードの選択(青い枠)を、そのまま維持する
+        // まだ正しい判断ができていないため、カードの選択(青い枠)を、そのまま維持する
         selectedQuestionId = questionId;
         selectedCardEl = cardEl;
         cardEl.classList.add('selected');
         showIncorrectExplanation(cardEl, incorrectMessage);
-      } else {
-        showFeedback(isCorrect, incorrectMessage);
       }
     }
 
     // ログイン済みユーザーのみ解答ログを保存(画面表示とは切り離し、裏側で行う)
-    const { data: { user } } = await supabaseClient.auth.getUser();
+    const user = await getCurrentUser();
     if (user) {
       const { error: logError } = await supabaseClient.from('user_answer_logs').insert({
         user_id: user.id,
@@ -1633,129 +1655,70 @@
     }
   }
 
-  // isCorrectがnullのときは「復習モード」(正誤ラベルを出さず、解説だけ見せる)
-  // 正誤判定の直後(handleAnswer)にのみ使用する。
-  // 仕分け済みカードの解説の見返しは、吹き出し(showCardExplanation)に置き換えたため、
-  // isCorrect === null での呼び出しは、現在は発生しない。
-  function showFeedback(isCorrect, explanation) {
-    const el = document.getElementById('feedback');
-    el.hidden = false;
-    if (isCorrect === null) {
-      el.textContent = explanation;
-      el.className = 'feedback review';
-    } else {
-      el.textContent = explanation;
-      el.className = 'feedback ' + (isCorrect ? 'correct' : 'incorrect');
-    }
-    // カードの枚数が多いとき、解説がデッキの下に隠れて見落とされないよう自動スクロール
-    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  // ── 7. 起動 ─────────────────────────────────────
+  function setupEventListeners() {
+    $('back-to-list-btn').addEventListener('click', showListView);
+    $('filter-category-select').addEventListener('change', applyListFilter);
+    $('theme-bookmark-btn').addEventListener('click', toggleCurrentThemeBookmark);
+    $('reset-progress-btn').addEventListener('click', resetThemeProgress);
+    $('next-theme-btn').addEventListener('click', goToNextTheme);
+    $('random-theme-btn').addEventListener('click', goToRandomTheme);
+    $('redeem-code-btn').addEventListener('click', redeemCode);
+
+    // モード切替(問題画面では、そのテーマを読み込み直す。一覧画面では、次に開くときの初期モードを切り替えるだけ)
+    $('mode-toggle-btn').addEventListener('click', () => {
+      isViewMode = !isViewMode;
+      updateModeBadges();
+      if (currentThemeId) loadTheme(currentThemeId);
+    });
+    $('list-mode-toggle-btn').addEventListener('click', () => {
+      isViewMode = !isViewMode;
+      updateModeBadges();
+    });
+
+    // シャッフル(問題画面では、通信せずに、メモリ上のバケツを並べ直す)
+    $('shuffle-toggle-btn').addEventListener('click', () => {
+      toggleShuffleSetting();
+      clearBucketSelection(); // バケツを作り直すため、古い選択状態(DOM参照)は、念のためクリアする
+      closeExplanationBubble(); // バケツの位置が変わるため、吹き出しも一緒に閉じる
+      if (currentBuckets.length) renderBuckets();
+    });
+    $('list-shuffle-toggle-btn').addEventListener('click', toggleShuffleSetting);
+
+    // 固定バーのボタンを押したときは、バケツ本体を押したときと同じ動きにする
+    $('bucket-bar').addEventListener('click', e => {
+      const btn = e.target.closest('.bucket-bar-chip');
+      if (btn && !isViewMode) activateBucket(btn.dataset.bucketId);
+    });
+    // 画面の向きや幅が変わると、バーの高さも変わるので、判定の基準を取り直す
+    let resizeTimer = null;
+    window.addEventListener('resize', () => {
+      clearTimeout(resizeTimer);
+      resizeTimer = setTimeout(() => {
+        if (!$('bucket-bar').hidden) setupBucketBarObserver();
+      }, 150);
+    });
+
+    // カード・バケツ以外の何もない場所をタップしたら、選択中の状態をまとめて解除する
+    document.addEventListener('click', e => {
+      if (e.target.closest('.card') || e.target.closest('.bucket')) return;
+      // 固定バー(ボタンと、そこから出た吹き出し)は、バケツと同じ扱い。ここで選択を解除してはいけない
+      if (e.target.closest('.bucket-bar') || e.target.closest('.explanation-bubble-wrap')) return;
+      clearCardSelection();
+      clearBucketSelection();
+      closeExplanationBubble();
+    });
   }
 
-  // ── 6. 初期表示 ─────────────────────────────────────
-  document.getElementById('back-to-list-btn').addEventListener('click', showListView);
-  document.getElementById('filter-category-select').addEventListener('change', applyListFilter);
-  document.getElementById('theme-bookmark-btn').addEventListener('click', toggleCurrentThemeBookmark);
-  document.getElementById('reset-progress-btn').addEventListener('click', resetThemeProgress);
-  document.getElementById('mode-toggle-btn').addEventListener('click', () => {
-    isViewMode = !isViewMode;
-    updateModeToggleButton();
-    updateListModeToggleButton();
-    if (currentThemeId) loadTheme(currentThemeId);
-  });
-  document.getElementById('shuffle-toggle-btn').addEventListener('click', () => {
-    isShuffleEnabled = !isShuffleEnabled;
-    localStorage.setItem('yokotoki_shuffle_buckets', String(isShuffleEnabled));
-    updateShuffleToggleButton();
-    clearBucketSelection(); // バケツを作り直すため、古い選択状態(DOM参照)は、念のためクリアする
-    closeExplanationBubble(); // バケツの位置が変わるため、吹き出しも一緒に閉じる
-    if (currentThemeId) {
-      supabaseClient.from('buckets').select('*').eq('theme_id', currentThemeId).order('sort_order')
-        .then(({ data: buckets }) => renderBuckets(buckets || [], isShuffleEnabled && currentThemeShuffleAllowed));
-    }
-  });
-  document.getElementById('list-mode-toggle-btn').addEventListener('click', () => {
-    isViewMode = !isViewMode;
-    updateListModeToggleButton();
-  });
-  document.getElementById('list-shuffle-toggle-btn').addEventListener('click', () => {
-    isShuffleEnabled = !isShuffleEnabled;
-    localStorage.setItem('yokotoki_shuffle_buckets', String(isShuffleEnabled));
-    updateShuffleToggleButton();
-  });
-  document.getElementById('next-theme-btn').addEventListener('click', goToNextTheme);
-  document.getElementById('random-theme-btn').addEventListener('click', goToRandomTheme);
-  document.getElementById('redeem-code-btn').addEventListener('click', async () => {
-    const code = document.getElementById('redeem-code-input').value.trim();
-    const msgEl = document.getElementById('redeem-message');
-    if (!code) return;
-
-    const { data: { user } } = await supabaseClient.auth.getUser();
-    if (!user) {
-      msgEl.hidden = false;
-      msgEl.textContent = '先にログインしてください。';
-      return;
-    }
-
-    const { data, error } = await supabaseClient.functions.invoke('redeem-code', { body: { code } });
-    msgEl.hidden = false;
-    if (error || data?.error) {
-      msgEl.textContent = 'コードが正しくないか、エラーが発生しました。';
-    } else {
-      msgEl.textContent = '解除しました。反映しています…';
-      if (currentThemeId) loadTheme(currentThemeId);
-    }
-  });
+  $('lock-note-link').href = NOTE_ARTICLE_URL;
+  setupEventListeners();
   setupListFilters();
-  updateListModeToggleButton();
+  updateSortButtons();
+  updateModeBadges();
   updateShuffleToggleButton();
   loadAnnouncement();
-
-  // 吹き出し・強調表示を、DOM要素ごと、確実に消す
-  function closeExplanationBubble() {
-    document.querySelectorAll('.explanation-bubble-wrap').forEach(el => el.remove());
-    document.querySelectorAll('.card.sorted.highlighted').forEach(el => el.classList.remove('highlighted'));
-    openBubbleQuestionId = null;
-  }
-
-  // 固定バーのボタンを押したときは、バケツ本体を押したときと同じ動きにする
-  document.getElementById('bucket-bar').addEventListener('click', e => {
-    const btn = e.target.closest('.bucket-bar-chip');
-    if (btn && !isViewMode) activateBucket(btn.dataset.bucketId);
-  });
-  // 画面の向きや幅が変わると、バーの高さも変わるので、判定の基準を取り直す
-  let bucketBarResizeTimer = null;
-  window.addEventListener('resize', () => {
-    clearTimeout(bucketBarResizeTimer);
-    bucketBarResizeTimer = setTimeout(() => {
-      if (!document.getElementById('bucket-bar').hidden) setupBucketBarObserver();
-    }, 150);
-  });
-
-  // カード・バケツ以外の何もない場所をタップしたら、選択中の状態をまとめて解除する
-  document.addEventListener('click', e => {
-    if (e.target.closest('.card') || e.target.closest('.bucket')) return;
-    // 固定バー(ボタンと、そこから出た吹き出し)は、バケツと同じ扱い。ここで選択を解除してはいけない
-    if (e.target.closest('.bucket-bar') || e.target.closest('.explanation-bubble-wrap')) return;
-    clearCardSelection();
-    clearBucketSelection();
-    closeExplanationBubble();
-  });
-
-  // ── URLに残る、認証トークンの後片付け ──────────────────
-  // onAuthStateChangeの中だけでチェックすると、イベントの発火と、
-  // URLへのハッシュの反映に、タイミングのズレ(レースコンディション)があり、
-  // 見逃すことが、Supabase側でも報告されている。そのため、ここでは、
-  // 独立して、短い間隔で、繰り返し確認する、より確実な方式にする。
-  // (Supabaseが、トークンを読み取り終えるまでの、猶予も、これで確保できる)
-  let hashCleanupAttempts = 0;
-  const hashCleanupTimer = setInterval(() => {
-    hashCleanupAttempts++;
-    if (window.location.hash && window.location.hash.includes('access_token')) {
-      history.replaceState(null, '', window.location.pathname + window.location.search);
-    }
-    if (hashCleanupAttempts >= 20) clearInterval(hashCleanupTimer); // 最大10秒間(500ms×20回)だけ確認する
-  }, 500);
-
-  devSignIn().then(initListView);</script>
+  startAuthTokenCleanup();
+  initListView();
+</script>
 </body>
 </html>
