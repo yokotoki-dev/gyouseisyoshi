@@ -105,6 +105,7 @@
   .theme-link-star { cursor: pointer; color: #c9ccd1; font-size: 16px; line-height: 1; }
   .theme-link-star.active { color: #f2a93b; }
   .theme-link-lock { font-size: 13px; opacity: .6; }
+  .theme-link-memo { font-size: 13px; }
   .theme-link-right { display: flex; align-items: center; gap: 10px; }
   .theme-link-accuracy { font-size: 12px; color: var(--muted); white-space: nowrap; }
   .theme-link-arrow { color: var(--muted); }
@@ -166,7 +167,7 @@
     cursor: default;
   }
   .mode-badge.view { background: var(--review-bg); color: var(--primary); }
-  .filter-btn { flex: 1; padding: 10px; border-radius: 20px; border: 1px solid var(--border); background: var(--card-bg); font-size: 13px; cursor: pointer; text-align: center; }
+  .filter-btn { flex: 1; padding: 10px 4px; border-radius: 20px; border: 1px solid var(--border); background: var(--card-bg); font-size: 12px; cursor: pointer; text-align: center; }
   .filter-btn.active { background: var(--primary); color: #fff; border-color: var(--primary); }
   .theme-breadcrumb { color: var(--muted); font-size: 12px; margin: 0 0 6px; }
   #theme-instruction {
@@ -426,6 +427,7 @@
     <div class="list-filters">
       <button class="filter-btn active" data-filter="all">すべて</button>
       <button class="filter-btn" data-filter="bookmark">★ ブックマーク</button>
+      <button class="filter-btn" data-filter="memo">📝 メモあり</button>
     </div>
     <div class="list-secondary-row">
       <div class="sort-toggle-group">
@@ -710,7 +712,7 @@
   // 一覧画面
   let themeSequence = [];            // 全カテゴリを横断した「カテゴリ順→テーマ順」の一覧(ブックマーク・履歴を含む)
   let categoryList = [];             // カテゴリのプルダウン用一覧
-  let currentListFilter = 'all';     // 'all' | 'bookmark'
+  let currentListFilter = 'all';     // 'all' | 'bookmark' | 'memo'
   let sortMode = 'none';             // 'none' | 'accuracy'(正答率が低い順) | 'lastAnswered'(最終回答日が古い順) | 'attempts'(周回数が少ない順)
   let isPremiumUser = false;         // 有料テーマにロックアイコンを出すかの判定に使う
   let searchHits = null;             // 検索の結果。null = 検索していない / Map(テーマID → ヒットの内訳)
@@ -738,6 +740,8 @@
   let memoSaved = '';                // サーバーに保存されている(または、読み込んだ)内容
   let memoValue = '';                // いまの内容(入力中のものを含む)
   let memoOpen = false;              // メモ欄を開いているか(画面を移ると、閉じる)
+  let memoFocused = false;           // メモの入力欄に、カーソルがあるか
+  let memoTextareaInView = false;    // メモの入力欄が、画面内に見えているか
   let memoDeleting = false;          // 「削除しますか?」の確認を出しているか
   let memoEditing = false;           // 編集中か(false = 閲覧。URLがリンクで出る)
   let memoLoggedIn = false;
@@ -749,6 +753,7 @@
   // 問題画面での「次へ・ランダム」の対象範囲(一覧画面での絞り込みを、テーマを開いたときに引き継ぐ)
   let activeThemeCategoryId = '';
   let activeThemeBookmarkOnly = false;
+  let activeThemeMemoOnly = false;
   let activeThemeSearchIds = null;   // 検索でヒットしていたテーマのID(Set)。null = 検索していない
   let activeThemeSortMode = 'none';
 
@@ -894,6 +899,7 @@
           categoryName: c.name,
           isFreeCategory: !!c.is_free,
           isBookmarked: false,
+          hasMemo: false,
           accuracy: null,
           attemptCount: 0,
           lastAnsweredAt: null,
@@ -911,6 +917,7 @@
       // ログアウト時、前のユーザーの進捗情報が画面に残らないよう、明示的にリセットする
       themeSequence.forEach(t => {
         t.isBookmarked = false;
+        t.hasMemo = false;
         t.accuracy = null;
         t.attemptCount = 0;
         t.lastAnsweredAt = null;
@@ -921,16 +928,20 @@
 
     const [
       { data: bookmarks, error: bookmarkErr },
-      { data: accuracyRows, error: accuracyErr }
+      { data: accuracyRows, error: accuracyErr },
+      { data: noteRows, error: noteErr }
     ] = await Promise.all([
       supabaseClient.from('user_bookmarks').select('theme_id').eq('user_id', user.id),
       supabaseClient.from('user_theme_accuracy').select('theme_id, total, correct, last_answered_at').eq('user_id', user.id),
+      supabaseClient.from('user_theme_notes').select('theme_id').eq('user_id', user.id),   // メモがあるテーマ(中身は、取らない)
       fetchPremiumStatus(user)
     ]);
     if (bookmarkErr) console.error('ブックマーク取得エラー:', bookmarkErr);
     if (accuracyErr) console.error('正答率取得エラー:', accuracyErr);
+    if (noteErr) console.error('メモ一覧の取得エラー:', noteErr);
 
     const bookmarkedThemeIds = new Set((bookmarks || []).map(b => b.theme_id));
+    const memoThemeIds = new Set((noteRows || []).map(r => r.theme_id));
     const statsById = {};
     (accuracyRows || []).forEach(row => { statsById[row.theme_id] = row; });
 
@@ -939,6 +950,7 @@
       const total = stats?.total || 0;
       const correct = stats?.correct || 0;
       t.isBookmarked = bookmarkedThemeIds.has(t.id);
+      t.hasMemo = memoThemeIds.has(t.id);
       t.attemptCount = total;
       t.accuracy = total > 0 ? correct / total : null; // 未挑戦はnull
       t.lastAnsweredAt = stats?.last_answered_at || null; // 未挑戦はnull
@@ -971,12 +983,13 @@
     renderThemeList($('filter-category-select').value);
   }
 
-  // 一覧に出すテーマ(カテゴリ・ブックマーク・検索の、絞り込みを、すべて満たすもの)
+  // 一覧に出すテーマ(カテゴリ・ブックマーク/メモあり・検索の、絞り込みを、すべて満たすもの)
   function getFilteredThemes(categoryId) {
     return themeSequence.filter(t => {
       if (categoryId && t.category_id !== categoryId) return false;
       if (searchHits && !searchHits.has(t.id)) return false;
       if (currentListFilter === 'bookmark') return t.isBookmarked;
+      if (currentListFilter === 'memo') return t.hasMemo;
       return true;
     });
   }
@@ -1056,6 +1069,12 @@
     const main = makeEl('span', 'theme-link-main');
     const star = makeEl('span', 'theme-link-star' + (t.isBookmarked ? ' active' : ''), t.isBookmarked ? '★' : '☆');
     main.append(star, makeEl('span', '', t.title));
+    if (t.hasMemo) {
+      const memoIcon = makeEl('span', 'theme-link-memo', '📝');
+      memoIcon.title = 'メモあり';
+      memoIcon.setAttribute('aria-label', 'メモあり');
+      main.appendChild(memoIcon);
+    }
     // 有料カテゴリのテーマで、まだ購入していないユーザーには、鍵アイコンを表示する
     if (!t.isFreeCategory && !isPremiumUser) {
       const lock = makeEl('span', 'theme-link-lock', '🔒');
@@ -1295,27 +1314,30 @@
     // 一覧画面で絞り込んでいたカテゴリ・ブックマーク・検索・並び順を、次へ・ランダムの対象範囲として引き継ぐ
     activeThemeCategoryId = $('filter-category-select').value;
     activeThemeBookmarkOnly = currentListFilter === 'bookmark';
+    activeThemeMemoOnly = currentListFilter === 'memo';
     activeThemeSearchIds = searchHits ? new Set(searchHits.keys()) : null;
     activeThemeSortMode = sortMode;
     loadTheme(themeId);
   }
 
   async function showListView() {
-    flushMemo();
+    const savingMemo = flushMemo();   // 書きかけのメモの保存が終わってから、一覧のメモのアイコンを読み直す
     hideMemo();
     hideBucketBar();
     $('practice-view').hidden = true;
     $('list-view').hidden = false;
-    // 問題画面で解答した内容(正答率・ブックマーク)を一覧に反映し直す
+    // 問題画面で解答した内容(正答率・ブックマーク・メモ)を一覧に反映し直す
+    await savingMemo;
     await loadUserProgress();
     applyListFilter();
   }
 
-  // 一覧画面での絞り込み(カテゴリ・ブックマーク・検索)を、次へ・ランダムの対象範囲に適用する
+  // 一覧画面での絞り込み(カテゴリ・ブックマーク/メモあり・検索)を、次へ・ランダムの対象範囲に適用する
   function getActiveThemePool() {
     const pool = themeSequence.filter(t => {
       if (activeThemeCategoryId && t.category_id !== activeThemeCategoryId) return false;
       if (activeThemeBookmarkOnly && !t.isBookmarked) return false;
+      if (activeThemeMemoOnly && !t.hasMemo) return false;
       if (activeThemeSearchIds && !activeThemeSearchIds.has(t.id)) return false;
       return true;
     });
@@ -1465,13 +1487,26 @@
     $('memo-retry-btn').hidden = !isError || memoLoadFailed;
   }
 
+  // 一覧の「メモあり」のアイコンを、いまの状態に合わせる(一覧に戻ったときに、取りこぼさないため)
+  function setThemeHasMemo(themeId, has) {
+    const t = themeSequence.find(x => x.id === themeId);
+    if (t) t.hasMemo = has;
+  }
+
+  // 入力中は画面下の固定バーを隠す(スマホのキーボードと重ならないように)。
+  // ただし、入力欄が画面の外へスクロールされたら、バーを出す(カーソルが残っていても、下のバケツを使えるように)
+  function updateMemoEditingClass() {
+    document.body.classList.toggle('memo-editing', memoFocused && memoTextareaInView);
+  }
+
   function hideMemo() {
     clearTimeout(memoSaveTimer);
     memoThemeId = null;
     memoEditing = false;
     memoDeleting = false;
     memoOpen = false;                // 画面を移るたびに、メモは閉じた状態から始める
-    document.body.classList.remove('memo-editing');
+    memoFocused = false;
+    updateMemoEditingClass();
     $('memo').hidden = true;
   }
 
@@ -1480,6 +1515,7 @@
     memoLoggedIn = !!user;
     memoLoadFailed = !!(result && result.error);
     memoSaved = (result && result.data && result.data.body) || '';
+    if (!memoLoadFailed) setThemeHasMemo(themeId, !!memoSaved);
     memoValue = memoSaved;
     memoQueuedValue = null;
     memoEditing = false;
@@ -1556,7 +1592,8 @@
     // 空のまま「完了」しても、保存済みの内容は消さない(消すときは、「削除」から)
     if (!memoValue.trim()) memoValue = memoSaved;
     memoEditing = false;
-    document.body.classList.remove('memo-editing');
+    memoFocused = false;
+    updateMemoEditingClass();
     saveMemoNow();
     renderMemo();
   }
@@ -1628,6 +1665,7 @@
       if (stillShown()) setMemoStatus('保存できませんでした(入力は、この画面に残っています)', true);
       return;
     }
+    setThemeHasMemo(themeId, !!value.trim());
     if (stillShown()) {
       memoSaved = value;
       $('memo-badge').hidden = !value.trim();
@@ -1660,8 +1698,16 @@
       setMemoStatus('');
       scheduleMemoSave();
     });
-    ta.addEventListener('focus', () => document.body.classList.add('memo-editing'));
-    ta.addEventListener('blur', () => { document.body.classList.remove('memo-editing'); flushMemo(); });
+    ta.addEventListener('focus', () => { memoFocused = true; updateMemoEditingClass(); });
+    ta.addEventListener('blur', () => { memoFocused = false; updateMemoEditingClass(); flushMemo(); });
+    if ('IntersectionObserver' in window) {
+      new IntersectionObserver(entries => {
+        memoTextareaInView = entries[entries.length - 1].isIntersecting;
+        updateMemoEditingClass();
+      }).observe(ta);
+    } else {
+      memoTextareaInView = true;
+    }
     // 画面を閉じる・アプリを切り替えるときに、まだ保存していない内容を、保存する(できる範囲で)
     document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') flushMemo(); });
     window.addEventListener('pagehide', flushMemo);
