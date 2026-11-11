@@ -99,6 +99,7 @@
   .theme-link-star { cursor: pointer; color: #c9ccd1; font-size: 16px; line-height: 1; }
   .theme-link-star.active { color: #f2a93b; }
   .theme-link-lock { font-size: 13px; opacity: .6; }
+  .theme-link-free { font-size: 11px; line-height: 1; padding: 3px 6px; border-radius: 10px; border: 1px solid var(--primary-light); color: var(--primary-light); white-space: nowrap; }
   .theme-link-memo { font-size: 13px; }
   .theme-link-right { display: flex; align-items: center; gap: 10px; }
   .theme-link-accuracy { font-size: 12px; color: var(--muted); white-space: nowrap; }

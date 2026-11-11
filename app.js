@@ -220,7 +220,8 @@
         .forEach(t => themeSequence.push({
           ...t,
           categoryName: c.name,
-          isFreeCategory: !!c.is_free,
+          isFreeTheme: !!c.is_free || !!t.is_free,   // 無料で読める(カテゴリが無料、または、このテーマだけ無料)
+          isTrial: !c.is_free && !!t.is_free,        // 有料カテゴリの中の、無料のお試しテーマ
           isBookmarked: false,
           hasMemo: false,
           accuracy: null,
@@ -398,11 +399,16 @@
       memoIcon.setAttribute('aria-label', 'メモあり');
       main.appendChild(memoIcon);
     }
-    // 有料カテゴリのテーマで、まだ購入していないユーザーには、鍵アイコンを表示する
-    if (!t.isFreeCategory && !isPremiumUser) {
+    // 有料のテーマで、まだ購入していないユーザーには、鍵アイコンを表示する
+    // (有料カテゴリの中の、無料のお試しテーマには、鍵ではなく「無料」の印を付ける)
+    if (!t.isFreeTheme && !isPremiumUser) {
       const lock = makeEl('span', 'theme-link-lock', '🔒');
       lock.title = '有料テーマ';
       main.appendChild(lock);
+    } else if (t.isTrial && !isPremiumUser) {
+      const tag = makeEl('span', 'theme-link-free', '無料');
+      tag.title = 'お試しで、無料で使えるテーマ';
+      main.appendChild(tag);
     }
 
     const right = makeEl('span', 'theme-link-right');
@@ -727,8 +733,8 @@
     const isPremium = await fetchPremiumStatus(user);
     if (themeId !== currentThemeId) return;
 
-    const isFreeCategory = theme.categories?.is_free || false;
-    const locked = !isFreeCategory && !isPremium;
+    const isFreeTheme = !!theme.categories?.is_free || !!theme.is_free;   // カテゴリが無料、または、このテーマだけ無料
+    const locked = !isFreeTheme && !isPremium;
 
     // ここまでで必要なデータが全部揃ったので、まとめて画面を更新する
     $('theme-instruction').textContent = theme.instruction;
