@@ -186,7 +186,7 @@
 
     // 問題画面を開いているときだけ、テーマを読み込み直す(一覧画面では、次に開くときに読み込まれる。
     // 一覧画面で読み込むと、見えていない問題画面のバーが、一覧の上に出てしまう)
-    if (currentThemeId && !$('practice-view').hidden) loadTheme(currentThemeId);
+    if (currentThemeId && !$('practice-view').hidden) loadTheme(currentThemeId, { keepLock: true });
     loadUserProgress().then(() => {
       if ($('list-view').hidden === false) applyListFilter();
     });
@@ -733,7 +733,8 @@
     if (href) $('report-link').href = href;
   }
 
-  async function loadTheme(themeId) {
+  // opts.keepLock: 同じテーマを読み込み直すとき(解除コード・ログイン状態の変化・モード切替)は、ロック画面を消さずに残す
+  async function loadTheme(themeId, opts = {}) {
     currentThemeId = themeId;
     // 前のテーマのメモは、保存してから切り替える(通信を待つ間に、前回の表示が一瞬残らないよう、真っ先にリセットする)
     flushMemo();
@@ -747,6 +748,12 @@
     $('theme-bookmark-btn').textContent = '☆ このテーマをブックマーク';
     $('theme-bookmark-btn').classList.remove('active');
     $('report-row').hidden = true;
+    // 前のテーマのロック画面も、真っ先に消す(消さないと、無料テーマを開いたとき、読み込みが終わるまで、ロック画面が一瞬残る)
+    if (!opts.keepLock) {
+      $('lock-screen').hidden = true;
+      $('redeem-message').hidden = true;
+      $('redeem-message').textContent = '';
+    }
 
     const user = await getCurrentUser(); // 一度確認していれば、すぐ返る
 
@@ -846,7 +853,7 @@
       msgEl.textContent = 'コードが正しくないか、エラーが発生しました。';
     } else {
       msgEl.textContent = '解除しました。反映しています…';
-      if (currentThemeId) loadTheme(currentThemeId);
+      if (currentThemeId) loadTheme(currentThemeId, { keepLock: true });
     }
   }
 
@@ -1568,7 +1575,7 @@
     $('mode-toggle-btn').addEventListener('click', () => {
       isViewMode = !isViewMode;
       updateModeBadges();
-      if (currentThemeId) loadTheme(currentThemeId);
+      if (currentThemeId) loadTheme(currentThemeId, { keepLock: true });
     });
     $('list-mode-toggle-btn').addEventListener('click', () => {
       isViewMode = !isViewMode;
