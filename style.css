@@ -278,6 +278,12 @@
     box-shadow: 0 4px 14px rgba(28,46,74,.25);
   }
   .explanation-bubble.incorrect { background: var(--incorrect); box-shadow: 0 4px 14px rgba(179,68,30,.25); }
+  /* マウスのあるパソコンでは、解説と、仕分け済みのカードの文字を、選んでコピーできるようにする。
+     (未仕分けのカードは、ドラッグで仕分けるため、選べないまま。指で触る端末は、タップの誤動作を避けるため、今のまま) */
+  @media (hover: hover) and (pointer: fine) {
+    .card.sorted { user-select: text; }
+    .explanation-bubble { user-select: text; cursor: text; }
+  }
   .deck { display: flex; flex-wrap: wrap; gap: 10px; }
   .card {
     position: relative;

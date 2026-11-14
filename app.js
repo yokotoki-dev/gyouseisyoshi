@@ -27,6 +27,14 @@
 
   const $ = id => document.getElementById(id);
 
+  // マウスのあるパソコンか(指で触る端末では、false)。パソコンでは、解説や仕分け済みカードの文字を、選んでコピーできるようにする
+  const canSelectText = () => window.matchMedia('(hover: hover) and (pointer: fine)').matches;
+  // el の中の文字を、選択中か(「選ぶためにドラッグした」クリックを、「タップ」と区別するため)
+  function hasTextSelectionIn(el) {
+    const sel = window.getSelection();
+    return !!sel && !sel.isCollapsed && !!sel.anchorNode && el.contains(sel.anchorNode);
+  }
+
   // ── 2. 純粋なロジック ───────────────────────────────
   // 画面にも通信にも触れない関数は、pure.js に置いてある(先に読み込まれる。tests/unit.test.js が単体で検査している)。
   //   shuffleArray / getRounds / getThemeComparator / formatLastAnsweredAt / getBucketBarColumns /
@@ -1197,8 +1205,14 @@
   // 仕分け済みのカード(バケツの中に並ぶカード)を作る。タップすれば、いつでも解説を見返せる
   function createSortedCard(question) {
     const chip = makeEl('div', 'card sorted', question.card_text);
+    let downX = 0, downY = 0;
+    chip.addEventListener('mousedown', e => { downX = e.clientX; downY = e.clientY; });
     chip.addEventListener('click', e => {
       e.stopPropagation();
+      // パソコンでは、解説の中をクリックしても閉じない。文字を選ぶためのドラッグの後も、閉じない(選んだ文字が消えるため)。
+      // ドラッグしていない普通のクリックは、選択が残っていても、今までどおり開閉する
+      const dragged = Math.hypot(e.clientX - downX, e.clientY - downY) > 4;
+      if (canSelectText() && (e.target.closest('.explanation-bubble-wrap') || (dragged && hasTextSelectionIn(chip)))) return;
       showCardExplanation(chip, question.id, question.explanation);
     });
     return chip;
@@ -1270,7 +1284,11 @@
         card.draggable = true;
         card.dataset.questionId = q.id;
 
-        card.addEventListener('click', () => selectCard(q.id, card));
+        card.addEventListener('click', e => {
+          // パソコンでは、カードの中に出た解説の文字を選ぶ操作(クリック)を、カードの選択として扱わない
+          if (canSelectText() && e.target.closest('.explanation-bubble-wrap')) return;
+          selectCard(q.id, card);
+        });
         card.addEventListener('dragstart', e => e.dataTransfer.setData('text/plain', q.id));
 
         el.appendChild(card);
@@ -1306,6 +1324,16 @@
     const wrap = makeEl('div', 'explanation-bubble-wrap' + (isIncorrect ? ' incorrect' : ''));
     const bubble = makeEl('div', 'explanation-bubble' + (isIncorrect ? ' incorrect' : ''), text);
     wrap.appendChild(bubble);
+    // 未仕分けのカードの中に出る解説は、カードがドラッグできるため、そのままでは文字を選べない(ドラッグが始まってしまう)。
+    // 解説の上でマウスを押している間だけ、カードのドラッグを止める
+    if (canSelectText()) {
+      wrap.addEventListener('mousedown', () => {
+        const host = wrap.closest('.card');
+        if (!host || !host.draggable) return;
+        host.draggable = false;
+        document.addEventListener('mouseup', () => { host.draggable = true; }, { once: true, capture: true });
+      });
+    }
     return { wrap, bubble };
   }
 
@@ -1573,7 +1601,12 @@
     });
 
     // カード・バケツ以外の何もない場所をタップしたら、選択中の状態をまとめて解除する
+    // 文字を選ぶためにドラッグして、吹き出しの外でマウスを離したときも、ここへ「何もない場所のクリック」として届く。
+    // マウスを動かしながら押した(ドラッグした)ときは、何もしない(解説が閉じて、選んだ文字が消えるのを防ぐ)
+    let downX = 0, downY = 0;
+    document.addEventListener('mousedown', e => { downX = e.clientX; downY = e.clientY; }, true);
     document.addEventListener('click', e => {
+      if (canSelectText() && Math.hypot(e.clientX - downX, e.clientY - downY) > 4) return;
       if (e.target.closest('.card') || e.target.closest('.bucket')) return;
       // 固定バー(ボタンと、そこから出た吹き出し)は、バケツと同じ扱い。ここで選択を解除してはいけない
       if (e.target.closest('.bucket-bar') || e.target.closest('.explanation-bubble-wrap')) return;
