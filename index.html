@@ -100,6 +100,16 @@
       <p class="lock-title">このテーマは有料会員限定です</p>
       <p class="lock-desc">note の記事を購入すると、解除コードが手に入ります</p>
       <a class="lock-button" id="lock-note-link" target="_blank" rel="noopener">note で購入する</a>
+      <ol class="lock-steps">
+        <li>note で記事を購入して、解除コードを確認する</li>
+        <li>Google アカウントでログインする</li>
+        <li>下の欄にコードを入れて、「解除する」を押す</li>
+      </ol>
+      <div id="lock-login" class="lock-login">
+        <button type="button" class="google-login-btn" id="lock-login-btn"></button>
+        <p class="lock-login-note">解除コードは、ログインしたアカウントに紐づきます(他の人とは共有できません)。ログインには Google アカウントが必要です(無料で作れます)。</p>
+      </div>
+      <p id="lock-login-done" class="lock-login-done" hidden>✓ ログイン済みです。解除コードを入力してください。</p>
       <div class="redeem-form">
         <input type="text" id="redeem-code-input" placeholder="解除コードを入力">
         <button id="redeem-code-btn">解除する</button>

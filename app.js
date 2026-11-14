@@ -24,6 +24,8 @@
   const REPORT_FORM_ENTRY_THEME_ID = 'entry.369983301';
   // シャッフル設定を、ブラウザに覚えさせるときの名前
   const SHUFFLE_STORAGE_KEY = 'yokotoki_shuffle_buckets';
+  // ログインで、いったんアプリを離れる間、「どのテーマを開いていたか」を覚えておくときの名前
+  const RETURN_THEME_KEY = 'yokotoki_return_theme';
 
   const $ = id => document.getElementById(id);
 
@@ -133,6 +135,26 @@
     }
   }
 
+  // 「Googleでログイン」のボタンの中身(上部のボタンと、有料テーマのロック画面のボタンで、共通)
+  const GOOGLE_LOGIN_BUTTON_HTML = `
+          <svg width="16" height="16" viewBox="0 0 48 48"><path fill="#EA4335" d="M24 9.5c3.5 0 6.6 1.2 9 3.6l6.7-6.7C35.9 2.4 30.4 0 24 0 14.6 0 6.5 5.4 2.5 13.2l7.8 6.1C12.2 13 17.6 9.5 24 9.5z"/><path fill="#4285F4" d="M46.5 24.5c0-1.6-.1-3.1-.4-4.5H24v9h12.7c-.5 3-2.2 5.4-4.7 7.1l7.4 5.7c4.3-4 6.8-9.9 6.8-17.3z"/><path fill="#FBBC05" d="M10.3 19.3A14.5 14.5 0 0 0 9.5 24c0 1.6.3 3.3.8 4.7l-7.8 6.1A24 24 0 0 1 0 24c0-3.9.9-7.6 2.5-10.8l7.8 6.1z"/><path fill="#34A853" d="M24 48c6.5 0 11.9-2.1 15.9-5.8l-7.4-5.7c-2.1 1.4-4.8 2.3-8.5 2.3-6.4 0-11.8-3.5-13.7-9.7l-7.8 6.1C6.5 42.6 14.6 48 24 48z"/></svg>
+          Googleでログイン
+        `;
+  // ログインのために、いったんGoogleのページへ移る。戻ってきたとき、開いていたテーマへ戻れるよう、そのテーマのIDを覚えておく
+  async function startGoogleLogin() {
+    try { if (currentThemeId && !$('practice-view').hidden) sessionStorage.setItem(RETURN_THEME_KEY, currentThemeId); } catch (e) { /* 覚えられなくても、ログインはできる */ }
+    await supabaseClient.auth.signInWithOAuth({ provider: 'google' });
+  }
+  // ログインから戻ってきたとき、ログイン前に開いていたテーマ(有料のロック画面など)へ、自動で戻る
+  async function resumeThemeAfterLogin() {
+    let themeId = null;
+    try { themeId = sessionStorage.getItem(RETURN_THEME_KEY); sessionStorage.removeItem(RETURN_THEME_KEY); } catch (e) { return; }
+    if (!themeId) return;
+    const user = await getCurrentUser();
+    if (!user || !themeSequence.some(t => t.id === themeId)) return;   // ログインしなかった(やめた)とき、テーマが無くなったときは、一覧のまま
+    openTheme(themeId);
+  }
+
   function renderAuthArea(user) {
     const el = $('auth-area');
     if (user) {
@@ -142,14 +164,9 @@
       });
     } else {
       el.innerHTML = `
-        <button class="google-login-btn" id="google-login-btn">
-          <svg width="16" height="16" viewBox="0 0 48 48"><path fill="#EA4335" d="M24 9.5c3.5 0 6.6 1.2 9 3.6l6.7-6.7C35.9 2.4 30.4 0 24 0 14.6 0 6.5 5.4 2.5 13.2l7.8 6.1C12.2 13 17.6 9.5 24 9.5z"/><path fill="#4285F4" d="M46.5 24.5c0-1.6-.1-3.1-.4-4.5H24v9h12.7c-.5 3-2.2 5.4-4.7 7.1l7.4 5.7c4.3-4 6.8-9.9 6.8-17.3z"/><path fill="#FBBC05" d="M10.3 19.3A14.5 14.5 0 0 0 9.5 24c0 1.6.3 3.3.8 4.7l-7.8 6.1A24 24 0 0 1 0 24c0-3.9.9-7.6 2.5-10.8l7.8 6.1z"/><path fill="#34A853" d="M24 48c6.5 0 11.9-2.1 15.9-5.8l-7.4-5.7c-2.1 1.4-4.8 2.3-8.5 2.3-6.4 0-11.8-3.5-13.7-9.7l-7.8 6.1C6.5 42.6 14.6 48 24 48z"/></svg>
-          Googleでログイン
-        </button>
+        <button class="google-login-btn" id="google-login-btn">${GOOGLE_LOGIN_BUTTON_HTML}</button>
       `;
-      $('google-login-btn').addEventListener('click', async () => {
-        await supabaseClient.auth.signInWithOAuth({ provider: 'google' });
-      });
+      $('google-login-btn').addEventListener('click', startGoogleLogin);
     }
   }
 
@@ -765,7 +782,7 @@
     updateShuffleToggleButton();
 
     if (locked) {
-      showLockScreen();
+      showLockScreen(user);
       return;
     }
     hideLockScreen();
@@ -796,10 +813,13 @@
   }
 
   // ロック画面と学習画面の出し分け
-  function showLockScreen() {
+  function showLockScreen(user) {
     hideBucketBar();
     $('buckets').hidden = true;
     $('deck').hidden = true;
+    // ログイン前は、「Googleでログイン」を出す。ログイン済みなら、その案内に替える
+    $('lock-login').hidden = !!user;
+    $('lock-login-done').hidden = !user;
     $('lock-screen').hidden = false;
   }
   function hideLockScreen() {
@@ -1617,6 +1637,8 @@
   }
 
   $('lock-note-link').href = NOTE_ARTICLE_URL;
+  $('lock-login-btn').innerHTML = GOOGLE_LOGIN_BUTTON_HTML;
+  $('lock-login-btn').addEventListener('click', startGoogleLogin);
   setupEventListeners();
   setupListFilters();
   setupSearch();
@@ -1626,4 +1648,4 @@
   updateShuffleToggleButton();
   loadAnnouncement();
   startAuthTokenCleanup();
-  initListView();
+  initListView().then(resumeThemeAfterLogin);

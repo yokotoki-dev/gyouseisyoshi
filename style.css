@@ -319,6 +319,12 @@
     cursor: pointer;
   }
   @media (hover: hover) { .lock-button:hover { background: var(--primary-light); } }
+  .lock-steps { text-align: left; max-width: 320px; margin: 24px auto 0; padding-left: 22px; font-size: 13px; line-height: 1.8; color: var(--ink); }
+  .lock-login { margin: 14px auto 0; max-width: 320px; }
+  .lock-login[hidden], .lock-login-done[hidden] { display: none; }
+  .lock-login .google-login-btn { margin: 0 auto; }
+  .lock-login-note { font-size: 12px; line-height: 1.6; color: var(--muted); margin: 10px 0 0; text-align: left; }
+  .lock-login-done { font-size: 13px; color: var(--primary); margin: 14px 0 0; }
   .redeem-form { display: flex; gap: 8px; margin: 20px auto 0; max-width: 320px; }
   .redeem-form input { flex: 1; padding: 10px; border-radius: 8px; border: 1px solid var(--border); font-size: 13px; }
   .redeem-form button { padding: 10px 16px; border-radius: 8px; border: none; background: var(--primary-light); color: #fff; font-size: 13px; cursor: pointer; }
