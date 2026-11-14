@@ -50,7 +50,7 @@
   // 一覧画面
   let themeSequence = [];            // 全カテゴリを横断した「カテゴリ順→テーマ順」の一覧(ブックマーク・履歴を含む)
   let categoryList = [];             // カテゴリのプルダウン用一覧
-  let currentListFilter = 'all';     // 'all' | 'bookmark' | 'memo'
+  let currentListFilter = 'all';     // 'all' | 'bookmark' | 'memo' | 'free'
   let sortMode = 'none';             // 'none' | 'accuracy'(正答率が低い順) | 'lastAnswered'(最終回答日が古い順) | 'attempts'(周回数が少ない順)
   let isPremiumUser = false;         // 有料テーマにロックアイコンを出すかの判定に使う
   let searchHits = null;             // 検索の結果。null = 検索していない / Map(テーマID → ヒットの内訳)
@@ -93,6 +93,7 @@
   let activeThemeCategoryId = '';
   let activeThemeBookmarkOnly = false;
   let activeThemeMemoOnly = false;
+  let activeThemeFreeOnly = false;
   let activeThemeSearchIds = null;   // 検索でヒットしていたテーマのID(Set)。null = 検索していない
   let activeThemeSortMode = 'none';
 
@@ -320,6 +321,7 @@
   async function initListView() {
     await buildThemeSequence();
     populateFilterSelectors();
+    updateFreeFilterButton();
     renderThemeList('');
   }
 
@@ -335,7 +337,20 @@
   }
 
   function applyListFilter() {
+    updateFreeFilterButton();
     renderThemeList($('filter-category-select').value);
+  }
+
+  // 「無料のみ」ボタン: 未購入で、無料のテーマと有料のテーマが混ざっているときだけ出す
+  // (購入済み・全部無料・全部有料のときは、絞り込む意味がないので出さない)
+  function updateFreeFilterButton() {
+    const mixed = themeSequence.some(t => t.isFreeTheme) && themeSequence.some(t => !t.isFreeTheme);
+    const show = !isPremiumUser && mixed;
+    $('filter-free-btn').hidden = !show;
+    if (!show && currentListFilter === 'free') {
+      currentListFilter = 'all';
+      document.querySelectorAll('.list-filters .filter-btn').forEach(b => b.classList.toggle('active', b.dataset.filter === 'all'));
+    }
   }
 
   // 一覧に出すテーマ(カテゴリ・ブックマーク/メモあり・検索の、絞り込みを、すべて満たすもの)
@@ -345,6 +360,7 @@
       if (searchHits && !searchHits.has(t.id)) return false;
       if (currentListFilter === 'bookmark') return t.isBookmarked;
       if (currentListFilter === 'memo') return t.hasMemo;
+      if (currentListFilter === 'free') return t.isFreeTheme;
       return true;
     });
   }
@@ -675,6 +691,7 @@
     activeThemeCategoryId = $('filter-category-select').value;
     activeThemeBookmarkOnly = currentListFilter === 'bookmark';
     activeThemeMemoOnly = currentListFilter === 'memo';
+    activeThemeFreeOnly = currentListFilter === 'free';
     activeThemeSearchIds = searchHits ? new Set(searchHits.keys()) : null;
     activeThemeSortMode = sortMode;
     loadTheme(themeId);
@@ -692,12 +709,13 @@
     applyListFilter();
   }
 
-  // 一覧画面での絞り込み(カテゴリ・ブックマーク/メモあり・検索)を、次へ・ランダムの対象範囲に適用する
+  // 一覧画面での絞り込み(カテゴリ・ブックマーク/メモあり/無料のみ・検索)を、次へ・ランダムの対象範囲に適用する
   function getActiveThemePool() {
     const pool = themeSequence.filter(t => {
       if (activeThemeCategoryId && t.category_id !== activeThemeCategoryId) return false;
       if (activeThemeBookmarkOnly && !t.isBookmarked) return false;
       if (activeThemeMemoOnly && !t.hasMemo) return false;
+      if (activeThemeFreeOnly && !isPremiumUser && !t.isFreeTheme) return false;
       if (activeThemeSearchIds && !activeThemeSearchIds.has(t.id)) return false;
       return true;
     });

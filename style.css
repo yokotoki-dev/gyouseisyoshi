@@ -107,7 +107,7 @@
   .list-empty { color: var(--muted); font-size: 14px; text-align: center; padding: 24px 0; }
   .footer-link { text-align: center; margin-top: 32px; font-size: 12px; }
   .footer-link a { color: var(--muted); }
-  .list-filters { display: flex; gap: 10px; margin-bottom: 12px; }
+  .list-filters { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
   .list-secondary-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
   .sort-toggle-group { display: flex; flex-direction: column; gap: 6px; align-items: flex-start; }
   .sort-toggle-btn {
@@ -162,7 +162,7 @@
     cursor: default;
   }
   .mode-badge.view { background: var(--review-bg); color: var(--primary); }
-  .filter-btn { flex: 1; padding: 10px 4px; border-radius: 20px; border: 1px solid var(--border); background: var(--card-bg); font-size: 12px; cursor: pointer; text-align: center; }
+  .filter-btn { flex: 1 1 auto; min-width: 0; white-space: nowrap; padding: 10px 4px; border-radius: 20px; border: 1px solid var(--border); background: var(--card-bg); font-size: 12px; cursor: pointer; text-align: center; }
   .filter-btn.active { background: var(--primary); color: #fff; border-color: var(--primary); }
   .theme-breadcrumb { color: var(--muted); font-size: 12px; margin: 0 0 6px; }
   #theme-instruction {
