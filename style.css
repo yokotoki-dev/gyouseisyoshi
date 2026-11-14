@@ -363,6 +363,11 @@
   }
   .theme-bookmark-btn.active { color: #b8860b; border-color: #f2a93b; }
 
+  /* 間違いの報告: 目立たせすぎない、小さなリンク */
+  .report-row { text-align: center; margin: 4px 0 24px; font-size: 12px; }
+  .report-row[hidden] { display: none; }
+  .report-link { color: var(--muted); }
+
   /* ── 画面下の固定バー: バケツの名前が、画面から外れたときだけ、バケツ名のボタンを並べて出す ── */
   .bucket-bar {
     position: fixed;

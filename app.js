@@ -17,6 +17,11 @@
 
   // 有料テーマのロック画面から飛ぶ、noteの記事のURL(公開前に、本物のURLへ置き換える)
   const NOTE_ARTICLE_URL = 'https://note.com/YOUR_ARTICLE_URL';
+  // 「間違いの報告」フォーム(Googleフォーム)。URLを空にすると、報告のリンクは出ない。
+  // entry.数字 は、フォームの「⋮ > 事前入力したURLを取得」で作ったURLにある、質問ごとの番号
+  const REPORT_FORM_URL = 'https://docs.google.com/forms/d/e/1FAIpQLSe22JVe5J4cXIhJT4IPxh3skRX_vM41Zfq_5QXwUvhgLDojjA/viewform';
+  const REPORT_FORM_ENTRY_THEME_NAME = 'entry.1676490368';
+  const REPORT_FORM_ENTRY_THEME_ID = 'entry.369983301';
   // シャッフル設定を、ブラウザに覚えさせるときの名前
   const SHUFFLE_STORAGE_KEY = 'yokotoki_shuffle_buckets';
 
@@ -25,7 +30,7 @@
   // ── 2. 純粋なロジック ───────────────────────────────
   // 画面にも通信にも触れない関数は、pure.js に置いてある(先に読み込まれる。tests/unit.test.js が単体で検査している)。
   //   shuffleArray / getRounds / getThemeComparator / formatLastAnsweredAt / getBucketBarColumns /
-  //   sameCardText / judgeAnswer / parseSearchKeywords / formatSearchHit / splitMemoLinks
+  //   sameCardText / judgeAnswer / parseSearchKeywords / formatSearchHit / splitMemoLinks / buildReportUrl
 
   // ── 3. 状態(メモリ上に持つ値) ──────────────────────
   // ログイン中のユーザー。undefined = まだ確認していない / null = 未ログイン
@@ -64,6 +69,7 @@
   let memoValue = '';                // いまの内容(入力中のものを含む)
   let memoOpen = false;              // メモ欄を開いているか(画面を移ると、閉じる)
   let memoFocused = false;           // メモの入力欄に、カーソルがあるか
+  let memoBlurTimer = null;          // カーソルが外れてから、画面下のバーを出すまでの、ごく短い待ち(下の説明を参照)
   let memoTextareaInView = false;    // メモの入力欄が、画面内に見えているか
   let memoDeleting = false;          // 「削除しますか?」の確認を出しているか
   let memoEditing = false;           // 編集中か(false = 閲覧。URLがリンクで出る)
@@ -695,6 +701,13 @@
 
   // ── 6. 問題画面 ──────────────────────────────────
   // ── 6-1. テーマ(設問)の読み込み ──
+  // 間違いの報告のリンク: 内容が見えているテーマ(ロック中ではない)にだけ出す。設定が空・不正なときは出さない
+  function updateReportLink(themeName, themeId) {
+    const href = buildReportUrl(REPORT_FORM_URL, REPORT_FORM_ENTRY_THEME_NAME, REPORT_FORM_ENTRY_THEME_ID, themeName, themeId);
+    $('report-row').hidden = !href;
+    if (href) $('report-link').href = href;
+  }
+
   async function loadTheme(themeId) {
     currentThemeId = themeId;
     // 前のテーマのメモは、保存してから切り替える(通信を待つ間に、前回の表示が一瞬残らないよう、真っ先にリセットする)
@@ -708,6 +721,7 @@
     $('theme-breadcrumb').textContent = '';
     $('theme-bookmark-btn').textContent = '☆ このテーマをブックマーク';
     $('theme-bookmark-btn').classList.remove('active');
+    $('report-row').hidden = true;
 
     const user = await getCurrentUser(); // 一度確認していれば、すぐ返る
 
@@ -748,6 +762,7 @@
     }
     hideLockScreen();
     showMemo(themeId, user, memoResult);
+    updateReportLink(`${theme.categories?.name || ''} › ${theme.title}`, themeId);
 
     if (isViewMode) {
       // 閲覧モード: シャッフルせず登録順で、最初から全問を仕分け済みとして表示する
@@ -834,6 +849,7 @@
     memoEditing = false;
     memoDeleting = false;
     memoOpen = false;                // 画面を移るたびに、メモは閉じた状態から始める
+    clearTimeout(memoBlurTimer);
     memoFocused = false;
     updateMemoEditingClass();
     $('memo').hidden = true;
@@ -921,6 +937,7 @@
     // 空のまま「完了」しても、保存済みの内容は消さない(消すときは、「削除」から)
     if (!memoValue.trim()) memoValue = memoSaved;
     memoEditing = false;
+    clearTimeout(memoBlurTimer);
     memoFocused = false;
     updateMemoEditingClass();
     saveMemoNow();
@@ -1027,8 +1044,14 @@
       setMemoStatus('');
       scheduleMemoSave();
     });
-    ta.addEventListener('focus', () => { memoFocused = true; updateMemoEditingClass(); });
-    ta.addEventListener('blur', () => { memoFocused = false; updateMemoEditingClass(); flushMemo(); });
+    ta.addEventListener('focus', () => { clearTimeout(memoBlurTimer); memoFocused = true; updateMemoEditingClass(); });
+    // 「完了」などのボタンを押した瞬間にも、入力欄のカーソルは外れる。すぐに画面下のバーを出すと、バーが、押しているボタンに重なり、
+    // ボタンを押したことにならない(指やマウスを離した場所が、ボタンではなくバーになる)。そのため、バーを出すのを、少しだけ遅らせる。
+    ta.addEventListener('blur', () => {
+      clearTimeout(memoBlurTimer);
+      memoBlurTimer = setTimeout(() => { memoFocused = false; updateMemoEditingClass(); }, 400);
+      flushMemo();
+    });
     if ('IntersectionObserver' in window) {
       new IntersectionObserver(entries => {
         memoTextareaInView = entries[entries.length - 1].isIntersecting;

@@ -122,6 +122,15 @@
     if (hit.memo_hit) parts.push('メモ');
     return parts.length ? 'ヒット: ' + parts.join('・') : '';
   }
+  // 「間違いの報告」のGoogleフォームを開くリンクを作る。テーマ名とテーマIDが、フォームに入力済みの状態で開く。
+  //   formUrl: フォームのURL(.../viewform)。Googleフォーム以外のURLや、空のときは、'' を返す(=リンクを出さない)
+  //   nameEntry / idEntry: フォームの「事前入力したURL」にある、質問ごとの番号(entry.数字)
+  function buildReportUrl(formUrl, nameEntry, idEntry, themeName, themeId) {
+    if (typeof formUrl !== 'string' || !/^https:\/\/docs\.google\.com\/forms\/d\/e\/[A-Za-z0-9_-]+\/viewform$/.test(formUrl)) return '';
+    if (!/^entry\.\d+$/.test(nameEntry || '') || !/^entry\.\d+$/.test(idEntry || '')) return '';
+    const enc = v => encodeURIComponent(String(v == null ? '' : v));
+    return `${formUrl}?usp=pp_url&${nameEntry}=${enc(themeName)}&${idEntry}=${enc(themeId)}`;
+  }
   // メモの文章を、「ふつうの文字」と「リンク」の並びに分ける。
   // リンクにするのは、http:// か https:// で始まるURLだけ(javascript: などは、リンクにしない)。
   // URLに使える文字は、半角の英数字と記号だけ。日本語の文章がURLのすぐ後ろに続いても、そこでURLは終わる
