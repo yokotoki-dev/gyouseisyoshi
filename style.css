@@ -99,6 +99,10 @@
   .theme-link-star { cursor: pointer; color: #c9ccd1; font-size: 16px; line-height: 1; }
   .theme-link-star.active { color: #f2a93b; }
   .theme-link-lock { font-size: 13px; opacity: .6; }
+  .theme-link-badge { font-size: 10px; line-height: 1; padding: 3px 6px; border-radius: 10px; white-space: nowrap; font-weight: 700; }
+  .theme-link-badge.new { background: var(--accent); color: #fff; }
+  .theme-link-badge.updated { background: var(--notice-bg); color: var(--notice); border: 1px solid var(--notice); }
+  .theme-date { color: var(--muted); font-size: 12px; margin: -2px 0 6px; }
   .theme-link-free { font-size: 11px; line-height: 1; padding: 3px 6px; border-radius: 10px; border: 1px solid var(--primary-light); color: var(--primary-light); white-space: nowrap; }
   .theme-link-memo { font-size: 13px; }
   .theme-link-right { display: flex; align-items: center; gap: 10px; }

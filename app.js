@@ -40,7 +40,8 @@
   // ── 2. 純粋なロジック ───────────────────────────────
   // 画面にも通信にも触れない関数は、pure.js に置いてある(先に読み込まれる。tests/unit.test.js が単体で検査している)。
   //   shuffleArray / getRounds / getThemeComparator / formatLastAnsweredAt / getBucketBarColumns /
-  //   sameCardText / judgeAnswer / parseSearchKeywords / formatSearchHit / splitMemoLinks / buildReportUrl
+  //   sameCardText / judgeAnswer / parseSearchKeywords / formatSearchHit / splitMemoLinks / buildReportUrl /
+  //   formatThemeDate / getThemeBadge
 
   // ── 3. 状態(メモリ上に持つ値) ──────────────────────
   // ログイン中のユーザー。undefined = まだ確認していない / null = 未ログイン
@@ -446,6 +447,13 @@
       memoIcon.setAttribute('aria-label', 'メモあり');
       main.appendChild(memoIcon);
     }
+    // 追加・更新から14日間は、「新規」「更新」の印を付ける(日付が空のテーマには、付けない)
+    const badge = getThemeBadge(t.created_on, t.updated_on, todayDateString());
+    if (badge) {
+      const b = makeEl('span', 'theme-link-badge ' + badge, badge === 'new' ? '新規' : '更新');
+      b.title = badge === 'new' ? '最近、追加されたテーマ' : '最近、内容が更新されたテーマ(' + formatThemeDate(t.updated_on) + ')';
+      main.appendChild(b);
+    }
     // 有料のテーマで、まだ購入していないユーザーには、鍵アイコンを表示する
     // (有料カテゴリの中の、無料のお試しテーマには、鍵ではなく「無料」の印を付ける)
     if (!t.isFreeTheme && !isPremiumUser) {
@@ -744,6 +752,22 @@
 
   // ── 6. 問題画面 ──────────────────────────────────
   // ── 6-1. テーマ(設問)の読み込み ──
+  // 今日の日付(端末の時刻)。'YYYY-MM-DD'
+  function todayDateString() {
+    const d = new Date();
+    const p = n => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+  }
+
+  // テーマ画面の更新日: 更新日があれば「更新日」、なければ「登録日」を出す。どちらも無ければ出さない
+  function updateThemeDate(theme) {
+    const updated = formatThemeDate(theme.updated_on);
+    const created = formatThemeDate(theme.created_on);
+    const text = updated ? `更新日: ${updated}` : created ? `登録日: ${created}` : '';
+    $('theme-date').textContent = text;
+    $('theme-date').hidden = !text;
+  }
+
   // 間違いの報告のリンク: 内容が見えているテーマ(ロック中ではない)にだけ出す。設定が空・不正なときは出さない
   function updateReportLink(themeName, themeId) {
     const href = buildReportUrl(REPORT_FORM_URL, REPORT_FORM_ENTRY_THEME_NAME, REPORT_FORM_ENTRY_THEME_ID, themeName, themeId);
@@ -766,6 +790,7 @@
     $('theme-bookmark-btn').textContent = '☆ このテーマをブックマーク';
     $('theme-bookmark-btn').classList.remove('active');
     $('report-row').hidden = true;
+    $('theme-date').hidden = true;
     // 前のテーマのロック画面も、真っ先に消す(消さないと、無料テーマを開いたとき、読み込みが終わるまで、ロック画面が一瞬残る)
     if (!opts.keepLock) {
       $('lock-screen').hidden = true;
@@ -811,6 +836,7 @@
       return;
     }
     hideLockScreen();
+    updateThemeDate(theme);
     showMemo(themeId, user, memoResult);
     updateReportLink(`${theme.categories?.name || ''} › ${theme.title}`, themeId);
 

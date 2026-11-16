@@ -122,6 +122,31 @@
     if (hit.memo_hit) parts.push('メモ');
     return parts.length ? 'ヒット: ' + parts.join('・') : '';
   }
+  // 日付(date型の 'YYYY-MM-DD')を、「2026年11月15日」の形にする。日付として正しくないもの(空・2月30日など)は、'' を返す
+  function parseDateOnly(value) {
+    const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(typeof value === 'string' ? value : '');
+    if (!m) return null;
+    const y = +m[1], mo = +m[2], d = +m[3];
+    const t = new Date(Date.UTC(y, mo - 1, d));
+    if (t.getUTCFullYear() !== y || t.getUTCMonth() !== mo - 1 || t.getUTCDate() !== d) return null;
+    return { y, mo, d, days: Math.round(t.getTime() / 86400000) };
+  }
+  function formatThemeDate(value) {
+    const p = parseDateOnly(value);
+    return p ? `${p.y}年${p.mo}月${p.d}日` : '';
+  }
+  // 一覧に出す印: 'new'(登録日から days 日以内) / 'updated'(更新日から days 日以内) / ''(なし)
+  //   登録日が新しいテーマは、更新日があっても 'new'。未来の日付(入力ミス)や、空・不正な日付は、印を出さない。
+  //   today: 'YYYY-MM-DD'(今日)
+  function getThemeBadge(createdOn, updatedOn, today, days) {
+    const limit = days == null ? 14 : days;
+    const t = parseDateOnly(today);
+    if (!t) return '';
+    const within = v => { const p = parseDateOnly(v); return !!p && t.days - p.days >= 0 && t.days - p.days < limit; };
+    if (within(createdOn)) return 'new';
+    if (within(updatedOn)) return 'updated';
+    return '';
+  }
   // 「間違いの報告」のGoogleフォームを開くリンクを作る。テーマ名とテーマIDが、フォームに入力済みの状態で開く。
   //   formUrl: フォームのURL(.../viewform)。Googleフォーム以外のURLや、空のときは、'' を返す(=リンクを出さない)
   //   nameEntry / idEntry: フォームの「事前入力したURL」にある、質問ごとの番号(entry.数字)
