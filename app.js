@@ -816,7 +816,15 @@
     ]);
     // 待っている間に別のテーマへ切り替わっていたら、この結果は使わずに中断する
     if (themeId !== currentThemeId) return;
-    if (themeErr) return console.error(themeErr);
+    if (themeErr || !theme) {
+      // 開こうとした間に、テーマが非表示になった(または、削除された)・通信できなかった場合。「読み込み中...」のまま止まらないようにする
+      console.error(themeErr);
+      // 「そのテーマが無い(隠された・削除された)」と分かるときは、一覧からも外す(通信の失敗のときは、外さない)
+      if (!themeErr || themeErr.code === 'PGRST116') themeSequence = themeSequence.filter(t => t.id !== themeId);
+      $('theme-instruction').textContent = 'このテーマを読み込めませんでした(非表示になった、または、通信できなかった可能性があります)。一覧に戻って、選び直してください。';
+      $('theme-breadcrumb').textContent = '';
+      return;
+    }
 
     // 解除コードを入れた直後にも呼ばれるので、課金状態は、ここで確認し直す
     const isPremium = await fetchPremiumStatus(user);
