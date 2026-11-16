@@ -801,18 +801,22 @@
     const user = await getCurrentUser(); // 一度確認していれば、すぐ返る
 
     // 必要な取得をできるだけまとめて並列で走らせる
+    // 課金状態(entitlements)も、ここで、同時に取る(解除コードを入れた直後にも呼ばれるので、毎回、取り直す)。
+    // 取得のあとに続けて取ると、通信の往復が、もう1回、直列に増えて、テーマを開くのが、その分、遅くなる。
     const [
       { data: theme, error: themeErr },
       { data: buckets },
       { data: questions },
-      memoResult
+      memoResult,
+      isPremium
     ] = await Promise.all([
       supabaseClient.from('themes').select('*, categories(is_free, name)').eq('id', themeId).single(),
       supabaseClient.from('buckets').select('*').eq('theme_id', themeId).order('sort_order'),
       supabaseClient.from('questions').select('*').eq('theme_id', themeId),
       user
         ? supabaseClient.from('user_theme_notes').select('body').eq('user_id', user.id).eq('theme_id', themeId).maybeSingle()
-        : Promise.resolve({ data: null, error: null })
+        : Promise.resolve({ data: null, error: null }),
+      fetchPremiumStatus(user)
     ]);
     // 待っている間に別のテーマへ切り替わっていたら、この結果は使わずに中断する
     if (themeId !== currentThemeId) return;
@@ -825,10 +829,6 @@
       $('theme-breadcrumb').textContent = '';
       return;
     }
-
-    // 解除コードを入れた直後にも呼ばれるので、課金状態は、ここで確認し直す
-    const isPremium = await fetchPremiumStatus(user);
-    if (themeId !== currentThemeId) return;
 
     const isFreeTheme = !!theme.categories?.is_free || !!theme.is_free;   // カテゴリが無料、または、このテーマだけ無料
     const locked = !isFreeTheme && !isPremium;
