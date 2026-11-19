@@ -17,9 +17,59 @@
     return t.questionCount > 0 ? attempts / t.questionCount : attempts;
   }
 
+  // ── おすすめ(テーマ単位) ──
+  // 苦手さ・間が空いた長さ・触れた回数の少なさ、の3つを0〜1の点数にして、合計(重みつき)が高いほど、おすすめ。
+  // 重みや日数は、ここの数字を変えるだけで、調整できる
+  const RECOMMEND_WEIGHTS = { weak: 0.5, stale: 0.3, fresh: 0.2 };   // 苦手さ 50% / 間が空いた長さ 30% / 触れた回数の少なさ 20%
+  const RECOMMEND_STALE_DAYS = 21;       // 最後に解いてから、この日数で、「間が空いた長さ」は最大(頭打ち)
+  const RECOMMEND_PRIOR_ANSWERS = 4;     // 回答が少ないうちは、正答率を中間(50%)に寄せる(4回答ぶんの重み)。たまたまの1回で、極端にならないように
+
+  // 最後に回答した日から、何日たったか(日付をまたいだ数ではなく、経過した時間を24時間で割った、切り捨て)
+  function daysSinceAnswered(lastAnsweredAt, now) {
+    if (!lastAnsweredAt) return null;
+    const ms = (now === undefined ? Date.now() : now) - new Date(lastAnsweredAt).getTime();
+    return Math.max(0, Math.floor(ms / 86400000));
+  }
+
+  // テーマ1つの、おすすめの点数。t: { accuracy(0〜1、未挑戦はnull), attemptCount, lastAnsweredAt, questionCount }
+  function getRecommendScore(t, now) {
+    const attempts = t.attemptCount || 0;
+    const accuracy = attempts > 0 && t.accuracy !== null && t.accuracy !== undefined ? t.accuracy : null;
+    // 未挑戦の苦手さは、「分からない」として、中間(0.5)に置く
+    const smoothed = accuracy === null ? 0.5 : (accuracy * attempts + 0.5 * RECOMMEND_PRIOR_ANSWERS) / (attempts + RECOMMEND_PRIOR_ANSWERS);
+    const weak = 1 - smoothed;
+    const days = daysSinceAnswered(t.lastAnsweredAt, now);
+    const stale = days === null ? 1 : Math.min(days / RECOMMEND_STALE_DAYS, 1);
+    const fresh = 1 / (1 + getRounds(t));
+    return RECOMMEND_WEIGHTS.weak * weak + RECOMMEND_WEIGHTS.stale * stale + RECOMMEND_WEIGHTS.fresh * fresh;
+  }
+
+  // おすすめの理由(一覧の右側・問題画面に出す短い文)
+  function getRecommendReason(t, now) {
+    if (!(t.attemptCount > 0) || t.accuracy === null || t.accuracy === undefined) return '未挑戦';
+    const days = daysSinceAnswered(t.lastAnsweredAt, now);
+    const when = days === null ? '' : days === 0 ? '・今日' : `・${days}日前`;
+    return `正答率 ${Math.round(t.accuracy * 100)}%${when}`;
+  }
+
+  // 開けないテーマ(未購入の、有料テーマ)か。おすすめでは、後回しにする(開けないテーマを、すすめても、意味がないため)
+  function isLockedTheme(t, isPremium) {
+    return !isPremium && t.isFreeTheme === false;
+  }
+
   // 並べ替えモードごとの比較関数。一覧画面と「次へ」で同じ基準を使うため、1か所にまとめている。
   // 未挑戦のテーマは常に先頭。同順位のときは元のテーマ順を保つ(sortは安定ソート)
-  function getThemeComparator(mode) {
+  // ctx: おすすめ('recommend')のときだけ使う { now(ミリ秒), isPremium }。点数が高い順。開けないテーマは、最後
+  function getThemeComparator(mode, ctx = {}) {
+    if (mode === 'recommend') {
+      const cache = new Map();
+      const scoreOf = t => { if (!cache.has(t)) cache.set(t, getRecommendScore(t, ctx.now)); return cache.get(t); };
+      return (a, b) => {
+        const la = isLockedTheme(a, ctx.isPremium), lb = isLockedTheme(b, ctx.isPremium);
+        if (la !== lb) return la ? 1 : -1;
+        return scoreOf(b) - scoreOf(a);
+      };
+    }
     if (mode === 'accuracy') {
       return (a, b) => {
         if (a.accuracy === null && b.accuracy === null) return 0;

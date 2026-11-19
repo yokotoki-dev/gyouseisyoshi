@@ -26,6 +26,10 @@
   const SHUFFLE_STORAGE_KEY = 'yokotoki_shuffle_buckets';
   // ログインで、いったんアプリを離れる間、「どのテーマを開いていたか」を覚えておくときの名前
   const RETURN_THEME_KEY = 'yokotoki_return_theme';
+  // スマホのブラウザは、裏に回したページを、メモリ節約のために、破棄することがある(戻ると、読み込み直しになる)。
+  // そのとき、開いていたテーマと、仕分けの途中経過を、元に戻せるよう、そのタブに覚えさせておく(古いものは、使わない)
+  const RESUME_KEY = 'yokotoki_resume';
+  const RESUME_MAX_AGE_MS = 6 * 60 * 60 * 1000;
 
   const $ = id => document.getElementById(id);
 
@@ -47,12 +51,13 @@
   // ログイン中のユーザー。undefined = まだ確認していない / null = 未ログイン
   let currentUser = undefined;
   let lastKnownUserId = undefined; // ログイン状態の変化の検出用(undefined = まだ一度も確認していない)
+  let themeLoadedForUserId;        // いま開いているテーマを、どのユーザー(未ログインは null)として読み込んだか
 
   // 一覧画面
   let themeSequence = [];            // 全カテゴリを横断した「カテゴリ順→テーマ順」の一覧(ブックマーク・履歴を含む)
   let categoryList = [];             // カテゴリのプルダウン用一覧
   let currentListFilter = 'all';     // 'all' | 'bookmark' | 'memo' | 'free'
-  let sortMode = 'none';             // 'none' | 'accuracy'(正答率が低い順) | 'lastAnswered'(最終回答日が古い順) | 'attempts'(周回数が少ない順)
+  let sortMode = 'none';             // 'none' | 'recommend'(おすすめ順) | 'accuracy'(正答率が低い順) | 'lastAnswered'(最終回答日が古い順) | 'attempts'(周回数が少ない順)
   let isPremiumUser = false;         // 有料テーマにロックアイコンを出すかの判定に使う
   let searchHits = null;             // 検索の結果。null = 検索していない / Map(テーマID → ヒットの内訳)
   let searchKeywords = [];           // いま表示している検索結果の、キーワード
@@ -150,11 +155,61 @@
   // ログインから戻ってきたとき、ログイン前に開いていたテーマ(有料のロック画面など)へ、自動で戻る
   async function resumeThemeAfterLogin() {
     let themeId = null;
-    try { themeId = sessionStorage.getItem(RETURN_THEME_KEY); sessionStorage.removeItem(RETURN_THEME_KEY); } catch (e) { return; }
-    if (!themeId) return;
+    try { themeId = sessionStorage.getItem(RETURN_THEME_KEY); sessionStorage.removeItem(RETURN_THEME_KEY); } catch (e) { return false; }
+    if (!themeId) return false;
     const user = await getCurrentUser();
-    if (!user || !themeSequence.some(t => t.id === themeId)) return;   // ログインしなかった(やめた)とき、テーマが無くなったときは、一覧のまま
+    if (!user || !themeSequence.some(t => t.id === themeId)) return false;   // ログインしなかった(やめた)とき、テーマが無くなったときは、一覧のまま
     openTheme(themeId);
+    return true;
+  }
+
+  // ── 読み込み直しからの復帰(ブラウザが、裏のページを破棄したとき) ──
+  let pendingResume = null;   // 復帰する途中経過(loadTheme が、1回だけ使う)
+
+  // 今開いているテーマ・モード・仕分けの途中経過を、このタブに覚えさせる。覚えられなくても、アプリは、そのまま動く
+  function saveResumeState(user, locked) {
+    try {
+      if (!currentThemeId || $('practice-view').hidden) return;
+      sessionStorage.setItem(RESUME_KEY, JSON.stringify({
+        themeId: currentThemeId,
+        uid: (user !== undefined ? user : currentUser)?.id || null,
+        viewMode: isViewMode,
+        order: locked ? [] : currentQuestions.map(q => q.id),   // ロック画面のときは、前のテーマのカードが残っているので、覚えない
+        sorted: locked || isViewMode ? [] : [...sortedIds],
+        ts: Date.now()
+      }));
+    } catch (e) { /* 覚えられなくても、学習は、続けられる */ }
+  }
+  function clearResumeState() {
+    try { sessionStorage.removeItem(RESUME_KEY); } catch (e) { /* 何もしない */ }
+  }
+  // 覚えていた内容。古い・壊れている・形がちがうときは、使わない
+  function readResumeState() {
+    try {
+      const r = JSON.parse(sessionStorage.getItem(RESUME_KEY) || 'null');
+      if (!r || typeof r.themeId !== 'string' || !Array.isArray(r.order) || !Array.isArray(r.sorted)) return null;
+      if (!(Date.now() - r.ts >= 0 && Date.now() - r.ts <= RESUME_MAX_AGE_MS)) return null;
+      return r;
+    } catch (e) { return null; }
+  }
+  // 起動のとき、前回、テーマを開いたまま、読み込み直しになっていたなら、そのテーマを開き直す(一覧に戻って、いったん閉じたなら、何もしない)
+  async function resumeAfterReload() {
+    const r = readResumeState();
+    if (!r) { clearResumeState(); return; }
+    const user = await getCurrentUser();
+    if ((user?.id || null) !== r.uid || !themeSequence.some(t => t.id === r.themeId)) { clearResumeState(); return; }   // ログイン状態が変わった・テーマが無くなったときは、一覧のまま
+    isViewMode = !!r.viewMode;
+    updateModeBadges();
+    pendingResume = r;
+    openTheme(r.themeId);
+  }
+  // 覚えていた並び順と、仕分け済みのカードを、いまのカード(questions)に当てはめる。増えた・減ったカードがあっても、壊れない
+  function applyResume(questions, r) {
+    const byId = new Map(questions.map(q => [q.id, q]));
+    const ordered = r.order.map(id => byId.get(id)).filter(Boolean);
+    const known = new Set(ordered.map(q => q.id));
+    const added = shuffleArray(questions.filter(q => !known.has(q.id)));   // 離れている間に増えたカードは、後ろに足す
+    return { questions: ordered.concat(added), sorted: new Set(r.sorted.filter(id => byId.has(id))) };
   }
 
   function renderAuthArea(user) {
@@ -188,7 +243,9 @@
 
     // 問題画面を開いているときだけ、テーマを読み込み直す(一覧画面では、次に開くときに読み込まれる。
     // 一覧画面で読み込むと、見えていない問題画面のバーが、一覧の上に出てしまう)
-    if (currentThemeId && !$('practice-view').hidden) loadTheme(currentThemeId, { keepLock: true });
+    // (起動の直後に届く、最初の通知は、すでに同じユーザーで読み込み中・読み込み済みなら、読み込み直さない。
+    //  読み込み直すと、読み込み直しからの復帰で戻した、並び順と仕分け済みのカードが、消えてしまう)
+    if (currentThemeId && !$('practice-view').hidden && themeLoadedForUserId !== userId) loadTheme(currentThemeId, { keepLock: true });
     loadUserProgress().then(() => {
       if ($('list-view').hidden === false) applyListFilter();
     });
@@ -366,6 +423,11 @@
     });
   }
 
+  // 並べ替えの比較関数に渡す、いまの状態(おすすめ順だけが使う: 今の時刻と、購入済みか)
+  function comparatorContext() {
+    return { now: Date.now(), isPremium: isPremiumUser };
+  }
+
   function renderThemeList(categoryId) {
     const el = $('theme-list');
     el.innerHTML = '';
@@ -382,7 +444,7 @@
     const isCrossCategorySort = !categoryId && sortMode !== 'none';
 
     if (isCrossCategorySort) {
-      filtered.slice().sort(getThemeComparator(sortMode)).forEach(t => el.appendChild(buildThemeLink(t)));
+      filtered.slice().sort(getThemeComparator(sortMode, comparatorContext())).forEach(t => el.appendChild(buildThemeLink(t)));
       return;
     }
 
@@ -398,7 +460,7 @@
 
     if (sortMode !== 'none') {
       // カテゴリの区切りは保ったまま、各カテゴリの中だけ並べ替える(未挑戦は先頭)
-      groups.forEach(g => g.themes.sort(getThemeComparator(sortMode)));
+      groups.forEach(g => g.themes.sort(getThemeComparator(sortMode, comparatorContext())));
     }
 
     groups.forEach(g => {
@@ -425,7 +487,9 @@
 
   function buildThemeLink(t) {
     let rightText;
-    if (sortMode === 'lastAnswered') {
+    if (sortMode === 'recommend') {
+      rightText = getRecommendReason(t, Date.now());
+    } else if (sortMode === 'lastAnswered') {
       rightText = formatLastAnsweredAt(t.lastAnsweredAt);
     } else if (sortMode === 'attempts') {
       if (!t.attemptCount) rightText = '未挑戦';
@@ -626,6 +690,7 @@
       closeExplanationBubble();
       document.querySelectorAll('.bucket-cards').forEach(el => { el.innerHTML = ''; });
       renderDeck();
+      saveResumeState();
     }
 
     alert('リセットしました。');
@@ -633,6 +698,7 @@
 
   // 並べ替えボタン(押すと、そのモードに切り替わり、もう一度押すと、テーマ順に戻る)
   const SORT_BUTTONS = [
+    { id: 'sort-recommend-btn', mode: 'recommend',    label: 'おすすめ順に並べ替え' },
     { id: 'sort-toggle-btn',    mode: 'accuracy',     label: '正答率が低い順に並べ替え' },
     { id: 'sort-by-date-btn',   mode: 'lastAnswered', label: '最終回答日が古い順に並べ替え' },
     { id: 'sort-by-count-btn',  mode: 'attempts',     label: '回答回数が少ない順に並べ替え' }
@@ -706,6 +772,7 @@
   }
 
   async function showListView() {
+    clearResumeState();   // 自分で一覧に戻ったなら、次に読み込み直しになっても、一覧のまま
     const savingMemo = flushMemo();   // 書きかけのメモの保存が終わってから、一覧のメモのアイコンを読み直す
     hideMemo();
     hideBucketBar();
@@ -718,7 +785,8 @@
   }
 
   // 一覧画面での絞り込み(カテゴリ・ブックマーク/メモあり/無料のみ・検索)を、次へ・ランダムの対象範囲に適用する
-  function getActiveThemePool() {
+  // skipSort: 並べ替えをしない(テーマ順のまま)
+  function getActiveThemePool(skipSort) {
     const pool = themeSequence.filter(t => {
       if (activeThemeCategoryId && t.category_id !== activeThemeCategoryId) return false;
       if (activeThemeBookmarkOnly && !t.isBookmarked) return false;
@@ -728,7 +796,7 @@
       return true;
     });
     // 一覧画面と同じ基準で並べ替える
-    if (activeThemeSortMode !== 'none') pool.sort(getThemeComparator(activeThemeSortMode));
+    if (!skipSort && activeThemeSortMode !== 'none') pool.sort(getThemeComparator(activeThemeSortMode, comparatorContext()));
     return pool;
   }
 
@@ -748,6 +816,26 @@
     if (!pool.length) return;
     const candidates = pool.length > 1 ? pool.filter(t => t.id !== currentThemeId) : pool;
     loadTheme(candidates[Math.floor(Math.random() * candidates.length)].id);
+  }
+
+  // 「おすすめのテーマへ」: 一覧での絞り込みの範囲内で、開けるテーマのうち、おすすめの点数が一番高いものを開く
+  // (いま開いているテーマは、除く。直前に解いたテーマの正答率などを、一覧に反映してから、選ぶ)
+  async function goToRecommendedTheme() {
+    if (!await ensureThemeSequence()) return;
+    await loadUserProgress();
+    const pool = getActiveThemePool(true).filter(t => t.id !== currentThemeId && !isLockedTheme(t, isPremiumUser));
+    if (!pool.length) {
+      showRecommendNote('おすすめできるテーマがありません(絞り込みの範囲に、ほかに開けるテーマがありません)');
+      return;
+    }
+    const now = Date.now();
+    const best = pool.slice().sort(getThemeComparator('recommend', { now, isPremium: isPremiumUser }))[0];
+    loadTheme(best.id);   // 読み込みの最初に、前の表示(理由の文も)を消すので、理由は、そのあとで出す
+    showRecommendNote(`おすすめの理由: ${getRecommendReason(best, now)}`);
+  }
+  function showRecommendNote(text) {
+    $('recommend-reason').textContent = text;
+    $('recommend-reason').hidden = !text;
   }
 
   // ── 6. 問題画面 ──────────────────────────────────
@@ -778,6 +866,9 @@
   // opts.keepLock: 同じテーマを読み込み直すとき(解除コード・ログイン状態の変化・モード切替)は、ロック画面を消さずに残す
   async function loadTheme(themeId, opts = {}) {
     currentThemeId = themeId;
+    // 読み込み直しからの復帰なら、その途中経過を、ここで1回だけ受け取る(別のテーマを開いたなら、使わない)
+    const resume = pendingResume && pendingResume.themeId === themeId ? pendingResume : null;
+    pendingResume = null;
     // 前のテーマのメモは、保存してから切り替える(通信を待つ間に、前回の表示が一瞬残らないよう、真っ先にリセットする)
     flushMemo();
     hideMemo();
@@ -791,6 +882,7 @@
     $('theme-bookmark-btn').classList.remove('active');
     $('report-row').hidden = true;
     $('theme-date').hidden = true;
+    if (!opts.keepLock) showRecommendNote('');   // 前の「おすすめの理由」は、消す
     // 前のテーマのロック画面も、真っ先に消す(消さないと、無料テーマを開いたとき、読み込みが終わるまで、ロック画面が一瞬残る)
     if (!opts.keepLock) {
       $('lock-screen').hidden = true;
@@ -799,6 +891,7 @@
     }
 
     const user = await getCurrentUser(); // 一度確認していれば、すぐ返る
+    themeLoadedForUserId = user?.id || null;
 
     // 必要な取得をできるだけまとめて並列で走らせる
     // 課金状態(entitlements)も、ここで、同時に取る(解除コードを入れた直後にも呼ばれるので、毎回、取り直す)。
@@ -825,6 +918,7 @@
       console.error(themeErr);
       // 「そのテーマが無い(隠された・削除された)」と分かるときは、一覧からも外す(通信の失敗のときは、外さない)
       if (!themeErr || themeErr.code === 'PGRST116') themeSequence = themeSequence.filter(t => t.id !== themeId);
+      clearResumeState();
       $('theme-instruction').textContent = 'このテーマを読み込めませんでした(非表示になった、または、通信できなかった可能性があります)。一覧に戻って、選び直してください。';
       $('theme-breadcrumb').textContent = '';
       return;
@@ -841,6 +935,7 @@
 
     if (locked) {
       showLockScreen(user);
+      saveResumeState(user, true);   // ロック画面のまま、読み込み直しになっても、同じテーマへ戻れるように
       return;
     }
     hideLockScreen();
@@ -852,6 +947,10 @@
       // 閲覧モード: シャッフルせず登録順で、最初から全問を仕分け済みとして表示する
       currentQuestions = (questions || []).slice().sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0));
       sortedIds = new Set(currentQuestions.map(q => q.id));
+    } else if (resume && !resume.viewMode) {
+      const applied = applyResume(questions || [], resume);   // 読み込み直しの前の、並び順と仕分け済みのカードを、元に戻す
+      currentQuestions = applied.questions;
+      sortedIds = applied.sorted;
     } else {
       currentQuestions = shuffleArray(questions || []);
       sortedIds = new Set();
@@ -869,6 +968,7 @@
     currentBuckets = buckets || [];
     renderBuckets();
     renderDeck();
+    saveResumeState(user);
   }
 
   // ロック画面と学習画面の出し分け
@@ -1564,6 +1664,7 @@
 
     if (isCorrect) {
       sortedIds.add(questionId);
+      saveResumeState();   // 仕分けの途中経過を、覚えておく
       const bucketCardsEl = bucketCardsElById(bucketId);
       if (bucketCardsEl) {
         const chip = createSortedCard(question);
@@ -1620,6 +1721,7 @@
     $('theme-bookmark-btn').addEventListener('click', toggleCurrentThemeBookmark);
     $('reset-progress-btn').addEventListener('click', resetThemeProgress);
     $('next-theme-btn').addEventListener('click', goToNextTheme);
+    $('recommend-theme-btn').addEventListener('click', goToRecommendedTheme);
     $('random-theme-btn').addEventListener('click', goToRandomTheme);
     $('redeem-code-btn').addEventListener('click', redeemCode);
 
@@ -1707,4 +1809,4 @@
   updateShuffleToggleButton();
   loadAnnouncement();
   startAuthTokenCleanup();
-  initListView().then(resumeThemeAfterLogin);
+  initListView().then(resumeThemeAfterLogin).then(opened => { if (!opened) return resumeAfterReload(); });
