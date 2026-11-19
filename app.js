@@ -828,10 +828,8 @@
       showRecommendNote('おすすめできるテーマがありません(絞り込みの範囲に、ほかに開けるテーマがありません)');
       return;
     }
-    const now = Date.now();
-    const best = pool.slice().sort(getThemeComparator('recommend', { now, isPremium: isPremiumUser }))[0];
-    loadTheme(best.id);   // 読み込みの最初に、前の表示(理由の文も)を消すので、理由は、そのあとで出す
-    showRecommendNote(`おすすめの理由: ${getRecommendReason(best, now)}`);
+    const best = pool.slice().sort(getThemeComparator('recommend', { now: Date.now(), isPremium: isPremiumUser }))[0];
+    loadTheme(best.id);
   }
   function showRecommendNote(text) {
     $('recommend-reason').textContent = text;
@@ -882,7 +880,7 @@
     $('theme-bookmark-btn').classList.remove('active');
     $('report-row').hidden = true;
     $('theme-date').hidden = true;
-    if (!opts.keepLock) showRecommendNote('');   // 前の「おすすめの理由」は、消す
+    if (!opts.keepLock) showRecommendNote('');   // 前の「おすすめできるテーマがありません」の案内は、消す
     // 前のテーマのロック画面も、真っ先に消す(消さないと、無料テーマを開いたとき、読み込みが終わるまで、ロック画面が一瞬残る)
     if (!opts.keepLock) {
       $('lock-screen').hidden = true;
